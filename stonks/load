@@ -1,0 +1,21 @@
+multiline
+!embed
+<drac2>
+gvar = "01073cf6-7b6a-42ac-8cce-aeb63eba4ec3"
+backupGvar = "a20ceb2a-b382-48b2-974b-0d241403e444"
+
+true = True
+false = False
+null = None
+
+savedDict = load_json(get_gvar(gvar))
+backupDict = {}
+commands = ""
+
+for stonksGvar in savedDict:
+    commands += "!gvar edit " + stonksGvar + " " + dump_json(savedDict[stonksGvar]) + "\n"
+    backupDict[stonksGvar] = load_json(get_gvar(stonksGvar))
+
+</drac2>
+{{commands}}
+!gvar edit {{backupGvar}} {{dump_json(backupDict)}}
