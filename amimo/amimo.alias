@@ -1,0 +1,1491 @@
+multiline
+{{ctx.prefix}}embed
+<drac2>
+argList = &ARGS&
+
+# **********************
+# *** Base Variables ***
+# **********************
+
+args = argparse(argList)
+
+defaults = load_json(get_svar("mapDefaults") or "{}") or {}
+mapsize = defaults.get("size", "10x10") or "10x10"
+maxSize = 99
+if mapsize != "JSON":
+    mapSplitX, mapSplitY = mapsize.lower().split('x')
+    mapX = max(min(int(mapSplitX) if mapSplitX.isdigit() else 1, maxSize), 1)
+    mapY = max(min(int(mapSplitY) if mapSplitY.isdigit() else 1, maxSize), 1)
+    mapsize = f"{mapX}x{mapY}"
+mapoptions = defaults.get("options", "")
+mapbg = defaults.get("background", "")
+mapinfo = {}
+mapview = ""
+mapviewsize = ""
+mapviewlocation = ""
+mapattach = None
+map = get("otfbm_base_url", "http://otfbm.io/")
+walls = []
+objects = []
+loadedjson = []
+fow = []
+targ = None
+combatantsMapInfo = {}
+baseAlph = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+alph = []
+for index in range(maxSize):
+    letter = ""
+    if index // 26:
+        letter = baseAlph[(index // 26) - 1]
+    letter += baseAlph[index % 26]
+    alph.append(letter)
+presetObjects = load_json(get_gvar("9b15344a-1f09-43b5-b84e-f61e32e4a89a"))
+overlays = []
+spelllist = []
+c = combat()
+gt = c.get_combatant if c else None
+debugMessages = []
+desc = []
+finalMap = ""
+sizeOffset = {"T": 0, "S": 0, "M": 0, "L": 1, "H": 1, "G": 2}
+COL, SIZ = {"w": "white", "bk": "black", "gy": "grey", "r": "red", "g": "green", "b": "blue", "y": "yellow", "p": "purple", "pk": "pink",
+            "c": "cyan", "bn": "brown", "o": "orange"}, {"T": "Tiny", "S": "Small", "M": "Medium", "L": "Large", "H": "Huge", "G": "Gargantuan"}
+
+# We don't have an aim point/target yet
+aimPoint = ""
+aimTarget = ""
+targAimPoint = ""
+targAimTarget = ""
+aimStick = False
+targPoint = ""
+aim = ""
+effect = None
+effectName = ""
+effectTarget = ""
+prevLoc = ""
+
+# F-Strings like to yell at me for \'s
+newline, targD, aimD, quote = "\n", "{targ}", "{aim}", '\\"'
+
+# What characters do we need to strip from names?
+nameStrip = r"""'"()[]{}*?^%$&#/-_~“”‘’"""
+</drac2>
+
+# <drac2>
+# # Pulling up tokenlist to view all created tokens
+# serverTokens = load_json(get_svar('mapTokens') or '{}')
+# userTokens = load_json(get('mapTokens', '{}'))
+# serverTokens.update(userTokens)
+# userTokens = serverTokens
+# tokenlist = [f"""**{tokens}** - `{str(over).replace('"',quote)}`""" for tokens,
+#              over in userTokens.items() if args.last('search', '').lower() in tokens.lower()]
+# tokenPagin = [tokenlist[i:i+20] for i in range(0, len(tokenlist), 20)]
+# </drac2>
+
+<drac2>
+# If we're in combat, check all the things
+if c:
+    # Collect information on every combatant
+    for combatant in combat().combatants:
+        # Grab map information, if it exists
+        for attack in combatant.attacks:
+            if attack.name == 'map':
+                mapattach = combatant
+                mapinfo = attack.raw.automation[-1].text
+                break
+        if mapattach:
+            break
+</drac2>
+
+<drac2>
+if c:
+    # If we found a `map` attack with information, parse it now
+    if mapinfo:
+        # Split and convert to dict. Couldn't use | here because of how -attack effects are parsed
+        mapinfo = mapinfo.split(' ~ ')
+        mapinfo = {x[0].lower(): x[1] for x in [item.split(': ')
+                                                for item in mapinfo]}
+        if mapinfo.get('size') == None:
+            mapsize = defaults.get("size", "10x10") or "10x10"
+        else:
+            mapsize = mapinfo.get('size')
+        # If user hasn't set mapsize = "JSON" then continue
+        if mapsize != "JSON":
+            if ":" in mapsize:
+                mapLocSize = mapsize.split(':')
+                mapviewlocation = f"{mapLocSize[0]}:"
+                mapsize = mapviewsize = mapLocSize[1]
+            if mapsize[0].isdigit():
+                mapSplitX, mapSplitY = mapsize.lower().split('x')
+                mapX = min(int(mapSplitX) if mapSplitX.isdigit()
+                           else 1, maxSize)
+                mapY = min(int(mapSplitY) if mapSplitY.isdigit()
+                           else 1, maxSize)
+            else:
+                mapX = alph.index(''.join(x.upper()
+                                  for x in mapsize if x.isalpha()))
+                mapY = int(''.join(y for y in mapsize if y.isdigit()))
+            mapsize = f"{mapX}x{mapY}"
+        mapbg = mapinfo.get('background')
+        mapoptions = mapinfo.get('options')
+        walls = mapinfo.get('walls')
+        walls = walls.split(', ') if walls else []
+        objects = mapinfo.get('objects')
+        objects = objects.split('/') if objects else []
+        loadedjson = mapinfo.get('json')
+        loadedjson = loadedjson.split(', ') if loadedjson else []
+        fow = mapinfo.get('fow')
+        fow = fow.split(', ') if fow else []
+        if mapinfo.get('view'):
+            mapviewlocation, mapviewsize = mapinfo.get(
+                'view').replace('::', ':').split(':')
+</drac2>
+
+<drac2>
+if c:
+    # Read each combatants notes for their information
+    for target in combat().combatants:
+        # If they have a note, perse it into a dict
+        if target.note and ':' in target.note:
+            note = target.note
+            note = note.split(" | ")
+            note = {x[0].lower(): x[1] for x in [item.split(": ")
+                                                 for item in note]}
+            if note.get('location'):
+                note['location'] = note['location'].upper()
+            combatantsMapInfo[target.name] = note
+            # Check if we have any overlays attached to effects, and then if at effect exists
+            for overNum in [""]+[str(x) for x in range(1, 11)]:
+                if combatantsMapInfo[target.name].get('effect'+overNum):
+                    checkEffect, checkEffectTarget = combatantsMapInfo[target.name].get(
+                        'effect'+overNum).split(' / ')
+                    # If the effect (or the target it was on) are gone, remove the effect
+                    if not gt(checkEffectTarget) or not gt(checkEffectTarget).get_effect(checkEffect):
+                        _ = combatantsMapInfo[target.name].pop(
+                            'effect'+overNum) if 'effect'+overNum in combatantsMapInfo[target.name] else None
+                        _ = combatantsMapInfo[target.name].pop(
+                            'aim'+overNum) if 'aim'+overNum in combatantsMapInfo[target.name] else None
+                        _ = combatantsMapInfo[target.name].pop(
+                            'overlay'+overNum) if 'overlay'+overNum in combatantsMapInfo[target.name] else None
+                        desc.append(
+                            f"""Overlay {overNum} removed from `{target.name}` because effect `{checkEffect}` no longer present{f" on {checkEffectTarget}" if checkEffectTarget!=target.name else ""}.""")
+                        desc.append("")
+        elif target.note:
+            note = target.note
+            desc.append(
+                f"Found a incorrectly formatted note on {target.name}, reformatted as a `-note`. ")
+            combatantsMapInfo[target.name] = {"note": note.replace(
+                ':', ' ').replace('|', ' ')}
+        else:
+            combatantsMapInfo[target.name] = {}
+</drac2>
+
+<drac2>
+# Lets back up our map each time we run it, why not
+# This will back the entire `combatantsMapInfo` dictionary containing everyones positions and states
+# to a uvar named mapStates, with the current channels id added as s key inside it.
+# This way you won't accidentally overwrite your backup with the backup from another channel
+
+mapStates = load_json(get('mapStates', '{}'))
+prevBack = mapStates.get(str(ctx.channel.id))
+mapStates.update({str(ctx.channel.id): combatantsMapInfo})
+lengthTotal = len(dump_json(mapStates))
+if lengthTotal >= 8000:
+    delete_uvar("mapStates")
+    mapStates = {str(ctx.channel.id): combatantsMapInfo}
+    set_uvar('mapStates', dump_json(mapStates))
+    desc.append(f"The uvar `mapStates`, which contains information for `!map undo`, was full, so it was cleared and current map setup was backed up.")
+else:
+    mapStates.update({str(ctx.channel.id): combatantsMapInfo})
+    set_uvar('mapStates', dump_json(mapStates))
+# Clean up old uvars that are no longer needed
+delete_uvar("mapState"+str(ctx.channel.id))
+delete_uvar("mapSize"+str(ctx.channel.id))
+</drac2>
+
+<drac2>
+def getOTFBMUrl():
+    output = ''
+    if c:
+        # Parse the collected notes and information into the format readable by otfbm.com
+        people = []
+        for target in combatantsMapInfo:
+            tLocation = combatantsMapInfo[target].get('location')
+            tSize = combatantsMapInfo[target].get('size', 'M')[0].upper()
+            tColor = combatantsMapInfo[target].get(
+                'color', 'b' if '/' in gt(target).hp_str() else 'r') + " "
+            tColor = tColor[:tColor.index(" ")].strip('#')
+            tToken = combatantsMapInfo[target].get('token')
+            # Account for hex colors
+            if len(tColor) in (3, 6):
+                tColor = f"~{tColor}".upper()
+            tName = target.translate(str.maketrans(' ', '_', nameStrip))
+            tName = tName.splitlines()[0]
+            # Only display if they have a location
+            if tLocation:
+                people.append(
+                    f"{tLocation}{tSize}{tColor}-{tName}{f'~{tToken}' if tToken else ''}")
+            # Do they have a height set? If so, display it
+            if combatantsMapInfo[target].get('height'):
+                desc.append(
+                    f"{target} is currently {combatantsMapInfo[target].get('height').strip('-+')} ft. {['above','below'][int(combatantsMapInfo[target].get('height').strip(' ft.m'))<0] if combatantsMapInfo[target].get('height').strip(' -+ft.m').isdigit() else 'above'} the ground.")
+            # Do they have overlays?
+            for overNum in [""]+[str(x) for x in range(1, 11)]:
+                # Ensure we're not grabbing the previous overlays aim point
+                targAimPoint = ""
+                if combatantsMapInfo[target].get('overlay'+overNum):
+                    targPoint = combatantsMapInfo[target].get('location', 'A1')
+                    # Is our target Large or bigger? If so, adjust accordingly
+                    if combatantsMapInfo[target].get('size', "M")[0] in "LHG":
+                        targOffset = sizeOffset.get(
+                            combatantsMapInfo[target].get('size', "M")[0])
+                        TargX = ''.join(x for x in targPoint if x.isalpha())
+                        TargY = int(''.join(y for y in targPoint if y.isdigit()))
+                        TargX = alph[alph.index(TargX)+targOffset]
+                        TargY += targOffset
+                        targPoint = f"{TargX}{TargY}"
+                    # If the target has an aim point set
+                    if combatantsMapInfo[target].get('aim'+overNum):
+                        for aimTarget in combatantsMapInfo:
+                            # We need to check to see if they were targetting a... target
+                            if combatantsMapInfo[target].get('aim'+overNum).lower() in aimTarget.lower():
+                                targAimPoint = combatantsMapInfo[aimTarget]['location']
+                                # Is our aimTarget larger than medium? If so, we need to offset to adjust
+                                if combatantsMapInfo[aimTarget].get('size', "M")[0] in "LHG":
+                                    targAimOffset = sizeOffset.get(
+                                        combatantsMapInfo[aimTarget].get('size', "M")[0])
+                                    targAimTargX = ''.join(
+                                        x for x in targAimPoint if x.isalpha())
+                                    targAimTargY = int(
+                                        ''.join(y for y in targAimPoint if y.isdigit()))
+                                    targAimTargX = alph[alph.index(
+                                        targAimTargX)+targAimOffset]
+                                    targAimTargY += targAimOffset
+                                    targAimPoint = f"{targAimTargX}{targAimTargY}"
+                            # If the aimTarget wasn't a target, it was coordinates. Use them.
+                            if not targAimPoint:
+                                targAimPoint = combatantsMapInfo[target].get(
+                                    'aim'+overNum).upper()
+                    # Add each targets overlay to the overlays list
+                    overlays.append(combatantsMapInfo[target].get(
+                        'overlay'+overNum).replace("{targ}", targPoint).replace("{aim}", targAimPoint).strip("*"))
+        # Reconvert all of our map information back into the readable note format
+        dataout = {x: ' | '.join(
+            [f"{item[0].title()}: {item[1]}"for item in combatantsMapInfo[x].items()])for x in combatantsMapInfo}
+        # Then set everyones note again. Kinda a chainsaw instead of a scalpel situation here.
+        for target in dataout:
+            gt(target).set_note(dataout[target])
+        # Join everything together and display the map if we aren't displaying the help
+
+        # Analytics removed, temporarily:
+        # &cid={ctx.channel.id}&sid={ctx.guild.id}&uid={ctx.author.id}{"&d=1" if testVersion else ""}
+        overlays = [f"*{overlay.strip('*')}" for overlay in overlays]
+
+        output = f"""{map}{mapsize}{f"/{mapviewlocation}:{mapviewsize}" if mapviewsize and mapviewlocation else ""}/{f'_{"_".join(walls)}/' if walls else ""}{f"@{mapoptions}/"if mapoptions else""}{f'{"/".join(objects)}/' if objects else ""}{f'{"*f"+"/*f".join(fow).replace(":", "")}/' if fow else ""}{'/'.join(people+overlays)}/?a=2{f"&load={'&load='.join(loadedjson)}" if loadedjson else ""}{f"&bg={mapbg.split('?')[0]}" if mapbg else ""}"""
+
+    return output
+</drac2>
+
+<drac2>
+# ****************************************************************************************
+# *     Start of AI Implementation
+# ****************************************************************************************
+
+#*region Setup Functions
+def debug(*argv):
+    debugMessages.append(" ".join([str(message) for message in argv]))
+    
+def isAutomatedMonster(combatant):
+    return combatant.monster_name and not 'ally' in combatantsMapInfo[combatant.name]
+
+def convertCoordinatesToIndexes(coordinates):
+    # Convert coordinates from alphanumeric representation to a set of indexes 
+    if typeof(coordinates) == 'str':
+        x = ''.join(x for x in coordinates if x.isalpha())
+        x = alph.index(x)
+        y = ''.join(y for y in coordinates if y.isdigit())
+        return (int(x), int(y)-1)
+    
+def convertCoordinatesToAlphanumeric(coordinates):
+    # Convert coordinates from a set of indexes representation to alphanumeric representation
+    if typeof(coordinates) != 'str':
+        return str(alph[coordinates[0]]) + str(coordinates[1]+1)
+
+def getSizeMultiplier(size): 
+    return 1 + (1 if size == 'L' else 2 if size == 'H' else 3 if size == 'G' else 0)
+
+def getCombatantCoordinates(name):
+    coordinates = []
+    info = combatantsMapInfo[name]
+    size = info.get('size', 'M')[0].upper()
+    sizeMultiplier = getSizeMultiplier(size)
+    x, y = convertCoordinatesToIndexes(info['location'])
+    for ax in range(x, x + sizeMultiplier):
+        for ay in range(y, y + sizeMultiplier):
+            coordinates.append((ax, ay))
+
+    return coordinates
+
+def getDistance(a, b, aSize='M', bSize='M'):
+    if typeof(a) == 'str':
+        if a in combatantsMapInfo:  # a is a combatant
+            aSize = combatantsMapInfo[a].get('size', 'M')[0].upper()
+            a = convertCoordinatesToIndexes(combatantsMapInfo[a]['location'])
+        else:  # a is a coordinate is represented like: A1
+            a = convertCoordinatesToIndexes(a)
+    if typeof(b) == 'str':
+        if b in combatantsMapInfo:  # b is a combatant
+            bSize = combatantsMapInfo[b].get('size', 'M')[0].upper()
+            b = convertCoordinatesToIndexes(combatantsMapInfo[b]['location'])
+        else:  # b is a coordinate is represented like: A1
+            b = convertCoordinatesToIndexes(b)
+    # Account for size
+    a = list(a)
+    b = list(b)
+    if a[0] < b[0]:
+        a[0] = min(mapX, a[0] + getSizeMultiplier(aSize) - 1)
+    else:
+        b[0] = min(mapX, b[0] + getSizeMultiplier(bSize) - 1)
+    if a[1] < b[1]:
+        a[1] = min(mapY, a[1] + getSizeMultiplier(aSize) - 1)
+    else:
+        b[1] = min(mapY, b[1] + getSizeMultiplier(bSize) - 1)
+
+    # Calculate the delta for X and Y between the two
+    deltaX, deltaY = abs(int(
+        a[0])-int(b[0])), abs(int(a[1])-int(b[1]))
+    # Doing 5ft diag's, the distance is just the higher delta
+    distance = max(deltaX, deltaY)*5
+
+    return distance
+
+def parseAttack(aliasAttack):
+    return { 'aliasAttack': aliasAttack, 'str': str(aliasAttack), 'name': aliasAttack.name, 'activation_type': aliasAttack.activation_type or 1, 'proper': aliasAttack.proper, 'raw': aliasAttack.raw, 'verb': aliasAttack.verb }
+
+def getCombatantAttacks(combatant):
+    return [parseAttack(attack) for attack in combatant.attacks]
+
+def getMonsterInfo(monsterName):
+    gvars = {
+        'a': ['3b3234da-bc76-40d3-81db-144a0c07b90f','4c2eaa22-fd0a-426e-8e3c-4fe40b2fe7dd','de9f65dd-cc66-47a9-92a1-c3ff33e89c6c','5be3548e-791f-430f-8004-8674cccd3c0c','d6c6d7d2-b618-41ae-af62-4d5d4ec844d1','1ef6c5b4-98ae-41fc-a2cc-b385f0463282','dfcef466-de65-4937-98d0-b457f39342d7','b9f2de37-e613-49ef-b6ed-7a96288e64c5','cdabcd32-c555-4f88-851e-93f2304dcf57','aa70de23-2ac9-4e38-9f77-4965fffaa218'],
+        'b': ['ec840753-e883-46b9-bb81-81eabc9b15ef','0e08581d-10b5-4e90-b00e-7fcf6cad493f','801b9e60-ec49-4e24-a27b-16541d599e98','3144a7bd-719a-489a-a9c3-8a93008a7b4e','c8a73239-8a16-4ffd-a329-f884b981ba0b','f9c953a1-ddd6-4a44-b802-51f47d0fd0ef'],
+        'c': ['3e0cf632-788a-4eeb-a92a-bbd5414024e6','b558b7f9-1e04-4267-8c75-f257ab575c5d','fb62cae5-f4e1-486c-b4f3-b160cd0376b2','e46ada97-a771-4dab-91a1-f0a065cca439','567a4aca-8dc3-406e-882b-dc4214b4fadb','027daf94-8fba-4be7-8aff-a6a1146d06e2'],
+        'd': ['df63d1f3-3374-4fe3-b81e-6e75e22ec952','a273d94d-b492-45ec-ad39-1abb0c096463','304962f9-9719-467a-b2bb-bfbc5bfbc229','8707509a-5540-45a7-a6d1-f561338ea0cb','5b7fc7f9-ef35-4173-ac5a-64623570c62f','f2850c54-8dd2-4227-84e5-3b2fc443abb5','50eebe6a-36c4-43a2-ac5b-fe75f49258f9','d68a92f8-f85d-46ab-9ab4-e724ba3b7785'],
+        'e': ['d397108d-bfe7-4ad9-a2f7-5b1bb832850a','41789be5-76e1-400a-8ebd-fb466e81abbc','f0af72b8-efa5-420c-b604-8097734c09a6'],
+        'f': ['b741e210-a13c-4ea8-b50b-66bb0fbfd767','9294bd0d-46fc-46ed-b5ac-d6a7b1df1321','56aca0e6-b341-4286-aede-f5485d6dbf9f','04966fdb-f52e-410f-8a8c-61558762a528'],
+        'g': ['38ba9a76-31a0-4356-af77-e2d69541ebad','1b698f52-88b8-458e-94b3-bda174053944','0faacca5-e341-4d67-a682-599cd37fd17f','48f027dc-963a-4db6-96c2-88dbb67e1e3b','83f0583d-8462-49fc-8071-c1f1e252e195','d578b25f-8862-409a-a2f6-79e35ad967c2','169d9118-9398-4edb-ac0a-beca9ae0f8e8'],
+        'h': ['be36f726-35e6-4671-9f8b-122043ccc80e','5c550112-257a-4fba-b182-0e32961e2274','3d80cde2-2262-4b73-9932-e9c6a73869d3','5371aba9-3c70-4fb1-9333-890cbdc94ad9'],
+        'i': ['547832a2-3467-4c88-8f30-0ae812b0c39e','081eaff9-1574-4359-b7ac-d58ab8f95bdd'],
+        'j': ['0c03b62d-97f9-4ad2-ad58-034ecf5ef136'],
+        'k': ['eda4c117-36ea-452b-bd18-880f13a51f99','68b70fb7-d920-4edc-95b1-463f7aac41f8','e1769e47-7f0b-4423-aa95-512e1fbf5f96'],
+        'l': ['2a16691a-421f-412c-bfd4-a735166050f8','9414ee5f-25b6-45c9-bf8c-451c85ab269a','6dc17242-0fd3-43d0-95c4-1b28bb817002'],
+        'm': ['ee2575c4-4229-49bc-84c2-d7ec85f77cfe','070f905d-298b-4c78-859b-e38bcdbf4032','321989b8-85f5-4b9c-85b5-3d5a97c4cadb','fe02af8f-d0a0-4089-9a54-cae366c004b9','08758814-368e-4026-a13c-dd94e7f90118','fded0e2b-a91c-40f9-8173-d030817cd8e7'],
+        'n': ['1c58c7e6-d2b2-49c4-9ae5-4267622d9d98','f65053db-fe7f-4757-a675-92c9fd65d155','7ce05901-7c86-4877-88ae-e3ed0b1a504f'],
+        'o': ['16ab3e63-0187-4035-ba88-726a50d33c25','041c61b7-c3aa-47b8-8343-d4190f1e1972','4fed026e-d14d-45f6-ab76-329afed58fcc'],
+        'p': ['967d7d29-7288-4d90-90e3-39b6c79ee74a','b3a242a2-4bb8-41ed-a364-514c0b301de0','f49fbb1e-3ab3-4204-846e-6dbf7b290556'],
+        'q': ['edfd1dd0-bba3-49c2-9ec8-a63f844835cb'],
+        'r': ['342e73a2-2c22-4dd2-8f75-49cabb9fb9bb','aad317a7-7293-4d31-a9de-6f9c3b3521d0','adc62cda-10a3-4abb-bad6-dedb3f656040','da826ed2-4c9b-4a81-9c67-c8252345997b'],
+        's': ['98132b58-3f97-4d65-91a1-ec28d32e504d','8b5caa80-62d6-4bea-bd26-737d58c8c51c','7b1ff13d-bdd4-410b-9e93-e2c6659cbd81','256a7167-388b-4adb-97c0-89567ad4e62e','23281bec-b551-4726-9c2e-658b0b3e962e','ee207b5c-d258-4d58-8858-95aaec5da876','a7f96713-2330-496f-bb60-2eac3d4ede66','2ff30280-43b6-4699-b52c-190f4af23058','54d2ba96-34bb-4971-b1d1-f4bfe5f1eee6','429c169e-bd3d-46ab-ba57-6bad87a798a1'],
+        't': ['bf3cc5dc-c098-4619-81d7-dec0431bd2bb','164d9a50-bcd5-428d-be06-103376ef1ca9','88df1d02-c805-4809-bdea-b635c87c611c','aa31207a-a07f-4646-bb6e-5cc4a0faec82'],
+        'u': ['e0166ea0-0498-4dbe-bbf4-de94fc4a52c3'],
+        'v': ['c1937e4b-4e31-4d9a-b1d8-b3487e9d2e9d','367c0c20-232a-46b9-9af3-1e2fa94c7479','78354079-5446-4e20-8888-76004b951a78'],
+        'w': ['230f4af0-6b68-4585-ae9c-50bc448d02dc','e664d5ed-da57-4953-a997-cc6456a7a29e','516cc4e7-9c00-4276-8c3c-ec95b58a0f6b'],
+        'x': ['9456f6d8-4fb8-4751-a3e4-51eea12d8aff'],
+        'y': ['576a0501-c74c-48a4-b474-c0253cf3d058','d15cf833-cfbb-4343-ac45-1e04b3d9beb0','89048bab-e149-4162-85be-dc83887a5377'],
+        'z': ['de40897f-2dfb-4e4e-8f0e-5240900ce191','414e3051-03ee-4e2a-8fbd-2496f32ab08a']
+    }
+    monsterInfo = None
+    filteredGvars = gvars[monsterName.lower()[0]]
+    for gvar in filteredGvars:
+        monsters = load_json(get_gvar(gvar))
+        monsterInfo = monsters.get(monsterName)
+        if monsterInfo and not monsterInfo.get('_copy', False):
+            break
+
+    return monsterInfo or {}
+
+def getMultiattackOptions(monsterInfo):
+    def addMultiattackOptions(options, confirmedMultiattackOptions, unconfirmedMultiattackOptions, joiners):
+            if joiners.afterAnd:
+                newOptions = []
+                for existingOption in unconfirmedMultiattackOptions:
+                    for option in options:
+                        existingOption.append(option)
+                        newOptions.extend(existingOption)
+                unconfirmedMultiattackOptions.clear()
+                unconfirmedMultiattackOptions.append(newOptions)
+            elif joiners.afterOr:
+                confirmedMultiattackOptions.extend(unconfirmedMultiattackOptions)
+                unconfirmedMultiattackOptions.clear()
+                unconfirmedMultiattackOptions.append([option for option in options])
+            joiners['afterAnd'] = False
+            joiners['afterOr'] = False   
+        
+    def getAttack(word, attacks):
+        foundAttack = None
+        sanitisedAttackNames = [attack.name.replace(' ', '').replace('.', '').replace(',', '').lower() for attack in attacks]
+        for i in range(len(sanitisedAttackNames)):
+            sanitisedAttackName = sanitisedAttackNames[i]
+            if '(' in sanitisedAttackName:
+                sanitisedAttackNames[i] = sanitisedAttackName[:sanitisedAttackName.find('(')]   # Remove stuff like "(1H)" or "(x form only)"
+                
+        for i in range(len(sanitisedAttackNames)):
+            sanitisedAttackName = sanitisedAttackNames[i]
+            if sanitisedAttackName in word.lower():
+                foundAttack = attacks[i]
+        
+        return foundAttack
+        
+    numbers = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']   # You should not be automating a monster with more than 12 attacks a turn, what are you Skynet?
+    joiners = {
+        'afterAnd': False,
+        'afterOr': True
+    }
+    confirmedMultiattackOptions = []
+    unconfirmedMultiattackOptions = []
+    if monsterInfo and 'multiattack' in [tag.lower() for tag in monsterInfo.get('actionTags', [])]:
+        # Do not continue if you value your sanity
+        attacks = []
+        meleeAttacks = []
+        rangedAttacks = []
+        
+        for attack in currentMonsterAttacks:
+            for automation in attack.raw.automation:
+                if automation.type == 'text' and ('Melee' in automation.text or 'Ranged' in automation.text):
+                    if 'Melee' in automation.text and not '(1H)' in attack.name:
+                        meleeAttacks.append(attack)
+                    if 'Ranged' in automation.text:
+                        rangedAttacks.append(attack)
+                    break
+                
+        attacks = meleeAttacks + rangedAttacks
+        
+        multiattackEntries = [action.entries for action in monsterInfo.action if action.name.lower() == 'multiattack'][0]
+        for multiattack in multiattackEntries:
+            words = multiattack.replace('--', ' ').split()
+            for i in range(len(attacks)):
+                attack = attacks[i]
+                attackWords = attack.name.split()
+                if len(attackWords) > 1 and attackWords[0].lower() in [word.lower() for word in words]:
+                    # Change attacks with multiple words (eg: Ice Blast) into one word (IceBlast) in the multiattack text for easier identification
+                    combinedAttackName = "".join(attackWords)
+                    attackWordIndex = [word.lower() for word in words].index(attackWords[0].lower())
+                    words[attackWordIndex] = combinedAttackName
+                    words.pop(attackWordIndex+1)
+        
+            i = 0
+            number = 1
+            while i < len(words):
+                word = words[i]
+                i += 1
+                # I warned you
+                if word.lower() in numbers:
+                    number = numbers.index(word.lower()) + 1
+                elif word.lower() == 'or':
+                    joiners['afterOr'] = True
+                elif word.lower() == 'and':
+                    joiners['afterAnd'] = True
+                elif number > 0:
+                    if word.lower() == 'melee':
+                        while i < len(words):
+                            word = words[i]
+                            i += 1
+                            if word.lower() in ['or', 'and'] or i == len(words):    # Monster can make any combination of x melee attacks
+                                for meleeAttack in meleeAttacks:    # We assume that the monster will always max x number of the same attack, never making two different melee attacks
+                                    options = []
+                                    options.append({
+                                        **meleeAttack,
+                                        'num': number
+                                    })
+                                    addMultiattackOptions(options, confirmedMultiattackOptions, unconfirmedMultiattackOptions, joiners)
+                                    joiners['afterOr'] = True
+                                joiners['afterOr'] = False
+                                number = 0
+                                if word.lower() in ['or', 'and']:
+                                    i -= 1
+                                break
+                            elif getAttack(word, meleeAttacks):
+                                i -= 1  # Return to outer loop to evaluate
+                                break
+                            elif word.lower() in numbers:
+                                i -= 1 # Return to outer loop to evaluate
+                                break
+                    elif word.lower() == 'ranged':
+                        while i < len(words):
+                            word = words[i]
+                            i += 1
+                            if word.lower() in ['or', 'and'] or i == len(words): # End of multiattack string. Monster can make any combination of x ranged attacks
+                                for rangedAttack in rangedAttacks:    # We assume that the monster will always max x number of the same attack, never making two different ranged attacks
+                                    options = []
+                                    options.append({
+                                        **rangedAttack,
+                                        'num': number
+                                    })
+                                    addMultiattackOptions(options, confirmedMultiattackOptions, unconfirmedMultiattackOptions, joiners)
+                                    joiners['afterOr'] = True
+                                joiners['afterOr'] = False
+                                number = 0
+                                if word.lower() in ['or', 'and']:
+                                    i -= 1
+                            elif getAttack(word, rangedAttacks):
+                                i -= 1  # Return to outer loop to evaluate
+                                break
+                            elif word.lower() in numbers:
+                                i -= 1 # Return to outer loop to evaluate
+                                break
+                    elif getAttack(word, attacks):
+                        attack = getAttack(word, attacks)
+                        addMultiattackOptions([{
+                            **attack,
+                            'num': number
+                        }], confirmedMultiattackOptions, unconfirmedMultiattackOptions, joiners)
+                        number = 0
+                        
+                    elif i == len(words) and len(confirmedMultiattackOptions) < 1 and len(unconfirmedMultiattackOptions) < 1:   # End of multiattack string but there are no multiattack options yet
+                        for attack in attacks:
+                            options = []
+                            options.append({
+                                **attack,
+                                'num': number
+                            })
+                            addMultiattackOptions(options, confirmedMultiattackOptions, unconfirmedMultiattackOptions, joiners)
+                            joiners['afterOr'] = True
+                        number = 0
+        
+    if len(unconfirmedMultiattackOptions) > 0:
+        confirmedMultiattackOptions += unconfirmedMultiattackOptions
+    return confirmedMultiattackOptions
+
+def goToTile(startingTile, targetTile, maxMovement, inverse=False):   # Inverse = True to move away from player instead
+    monsterX, monsterY = startingTile
+    targetX, targetY = targetTile
+    xDiff = (targetX - monsterX) * TILE_SIZE
+    yDiff = (targetY - monsterY) * TILE_SIZE
+    
+    xMovement = 0
+    yMovement = 0
+    
+    if inverse:
+        xMovement = maxMovement * (1 if xDiff < 0 else -1)
+        yMovement = maxMovement * (1 if yDiff < 0 else -1)
+    else:
+        xMovement = min(abs(xDiff), maxMovement) * (-1 if xDiff < 0 else 1)
+        yMovement = min(abs(yDiff), maxMovement) * (-1 if yDiff < 0 else 1)
+        
+    finalX = max(0, min(mapX, int(monsterX+(xMovement/TILE_SIZE))))
+    finalY = max(0, min(mapY, int(monsterY+(yMovement/TILE_SIZE))))
+    finalTile = (finalX, finalY)
+    # debug('finalTile 1', convertCoordinatesToAlphanumeric(finalTile))
+    if finalTile not in viableTiles:
+        # Find closest adjacent tile to target tile
+        closestTile = None
+        offset = 1
+        while not closestTile:
+            fx, fy = finalTile
+            adjacentTiles = [(fx - offset, fy - offset), (fx + offset, fy + offset), (fx + offset, fy - offset), (fx - offset, fy + offset)] + [(x, y) for y in range(fy - offset + 1, fy + offset) for x in [fx - offset, fx + offset]] + [(x, y) for x in range(fx - offset + 1, fx + offset) for y in [fy - offset, fy + offset]]    # Generate perimeter coordinates
+            adjacentTiles = [(x, y) for (x, y) in adjacentTiles if (x, y) in viableTiles and max(abs(x - startingTile[0]), abs(y - startingTile[1]))*TILE_SIZE <= maxMovement]
+            if len(adjacentTiles):
+                if startingTile in adjacentTiles:
+                    closestTile = startingTile
+                else:
+                    closestTile = randchoice(adjacentTiles)
+            else:
+                offset += 1
+        finalTile = closestTile
+    
+    # debug('finalTile 2', convertCoordinatesToAlphanumeric(finalTile))
+    return finalTile
+    
+def movementLimiter(viableTiles):
+    """
+    Tiles that the monster can reach through movement
+    """
+    speed = (speeds.fly if 'fly' in speeds.keys() else speeds.walk) * 2 # Include dashing
+    tempTiles = viableTiles.copy()
+    monsterCoordinates = convertCoordinatesToIndexes(combatantsMapInfo[globals.currentMonster.name]['location'])
+    monsterSize = combatantsMapInfo[globals.currentMonster.name].get('size', 'M')[0].upper()
+    monsterSizeMultiplier = getSizeMultiplier(monsterSize)
+    minX = int(max(0, monsterCoordinates[0] - ( speed / TILE_SIZE )))
+    minY = int(max(0, monsterCoordinates[1] - ( speed / TILE_SIZE )))
+    maxX = int(min(mapX - monsterSizeMultiplier, monsterCoordinates[0] + ( speed / TILE_SIZE )))
+    maxY = int(min(mapY - monsterSizeMultiplier, monsterCoordinates[1] + ( speed / TILE_SIZE )))
+    if len(tempTiles) == mapX*mapY:
+        # No tiles have been eliminated yet. It will be more efficient to calculate viable tiles based on monster speed
+        tempTiles = [(x, y) for y in range(minY, maxY + 1) for x in range(minX, maxX + 1)]
+    else:
+        # Some tiles have been eliminated. It should be more efficient eliminate more tiles based on monster speed
+        tempTiles = [(x, y) for y in range(minY, maxY + 1) for x in range(minX, maxX + 1) if (x, y) in viableTiles]
+        
+    return tempTiles
+
+def avoidStandingInSpaceWithCombatants(monsterInfo):
+    # Ignore this function if the monster has the 'Swarm' trait
+    if not ('trait' in monsterInfo and len([trait for trait in monsterInfo['trait'] if trait.name.lower() == 'swarm']) > 0):
+        selfSize = combatantsMapInfo[globals.currentMonster.name].get('size', 'M')[0].upper()
+        selfSizeMultiplier = getSizeMultiplier(selfSize)
+        for name, info in combatantsMapInfo.items():
+            if name != globals.currentMonster.name and 'location' in info:
+                x, y = convertCoordinatesToIndexes(info['location'])
+                otherCombatantSize = info.get('size', 'M')[0].upper()
+                otherSizeMultiplier = getSizeMultiplier(otherCombatantSize)   # Account for extra space other Large or larger combatants take up 
+                for ax in range(max(0, x - selfSizeMultiplier + 1), min(mapX, x + otherSizeMultiplier)):
+                    for ay in range(max(0, y - selfSizeMultiplier + 1), min(mapY, y + otherSizeMultiplier)):
+                        try:
+                            viableTiles.remove((ax, ay))
+                        except:
+                            pass
+    
+    return viableTiles
+
+def getClosestViableMeleeTargetAndTile():
+    bestTarget = None
+    bestTile = None
+    
+    maxMeleeRange = 0
+    minMeleeRange = float('inf')
+    meleeAttacks = [] # Object of { name, range }
+    for attack in currentMonsterAttacks:
+        for automation in attack.raw.automation:
+            if automation.type == 'text' and 'Melee' in automation.text and not '(1H)' in attack.name:
+                attackRange = int(automation.text[automation.text.find('reach ') + 6:automation.text.find(' ft.')])
+                meleeAttacks.append({ **attack, 'range': attackRange })
+                maxMeleeRange = max(maxMeleeRange, attackRange)
+                minMeleeRange = min(minMeleeRange, attackRange)
+                break
+            
+    monsterCoordinates = convertCoordinatesToIndexes(combatantsMapInfo[globals.currentMonster.name]['location'])
+    monsterSize = combatantsMapInfo[globals.currentMonster.name].get('size', 'M')[0].upper()
+    monsterSizeMultiplier = getSizeMultiplier(monsterSize)
+    bestTarget = None
+    targetsByDistance = [(target, getDistance(globals.currentMonster.name, target.name)) for target in availableTargets]
+    targetsByDistance.sort(key=lambda target: target[1])
+    for (target, distance) in targetsByDistance:
+        if distance <= minMeleeRange:
+            bestTarget = target
+            bestTile = monsterCoordinates
+            break
+            
+        closestTilesAroundTarget = []
+        closestTilesAroundTargetDistance = float('inf')
+        targetX, targetY = convertCoordinatesToIndexes(combatantsMapInfo[target.name]['location'])
+        targetSize = combatantsMapInfo[target.name].get('size', 'M')[0].upper()
+        targetSizeMultiplier = getSizeMultiplier(targetSize)
+        
+        tilesAroundTarget = [(ax, ay) for ay in range(max(0, int(targetY - monsterSizeMultiplier + 1 - ( maxMeleeRange / TILE_SIZE ))), min(mapY, (int(targetY + targetSizeMultiplier + ( maxMeleeRange / TILE_SIZE ))))) for ax in range(max(0, int(targetX - monsterSizeMultiplier + 1 - ( maxMeleeRange / TILE_SIZE ))), min(mapX, int(targetX + targetSizeMultiplier + ( maxMeleeRange / TILE_SIZE ))))]
+        # for ax in range(max(0, int(targetX - monsterSizeMultiplier + 1 - ( maxMeleeRange / TILE_SIZE ))), min(mapX, int(targetX + targetSizeMultiplier + ( maxMeleeRange / TILE_SIZE )))):
+        #     for ay in range(max(0, int(targetY - monsterSizeMultiplier + 1 - ( maxMeleeRange / TILE_SIZE ))), min(mapY, (int(targetY + targetSizeMultiplier + ( maxMeleeRange / TILE_SIZE ))))):
+        #         tilesAroundTarget.append((ax, ay))
+        for tile in tilesAroundTarget:
+            if tile in viableTiles:
+                distance = getDistance(tile, target.name, monsterSize)
+                if distance < closestTilesAroundTargetDistance:
+                    closestTilesAroundTarget = [tile]
+                    closestTilesAroundTargetDistance = distance
+                elif distance == closestTilesAroundTargetDistance:
+                    closestTilesAroundTarget.append(tile)
+                if distance == TILE_SIZE:
+                    break
+        
+        if len(closestTilesAroundTarget) > 0:
+            bestTarget = target
+            break
+                
+    if not bestTarget:
+        bestTarget = targetsByDistance[0][0]    # If no target has an open melee space next to it, go to the nearest target
+    elif not bestTile:
+        bestTile = min(closestTilesAroundTarget, key=lambda tile: getDistance(tile, bestTarget.name))
+    
+    return bestTarget, bestTile
+
+def getClosestViableRangedAttackTargetAndTile():
+    closestTarget = None
+    bestTile = None
+    
+    rangedAttacks = [] # Object of { name, shortRange, longRange }
+    rangedShortRange = float('inf')
+    rangedLongRange = 0
+    
+    for attack in currentMonsterAttacks:
+        for automation in attack.raw.automation:
+            if automation.type == 'text' and 'Ranged' in automation.text:
+                rangeTextStartIndex = 0
+                if 'range ' in automation.text:
+                    rangeTextStartIndex = automation.text.find('range ') + 6
+                elif 'ranged ' in automation.text:
+                    rangeTextStartIndex = automation.text.find('ranged ') + 7
+                attackRangeAll = automation.text[rangeTextStartIndex : rangeTextStartIndex + automation.text[rangeTextStartIndex:].find(' ft.')]
+                attackRangeAll = attackRangeAll.split('/')
+                attackRangeShort = attackRangeAll[0]
+                if len(attackRangeAll) > 1:
+                    attackRangeLong = attackRangeAll[1]
+                else:
+                    attackRangeLong = attackRangeShort
+                attackRangeShort, attackRangeLong = int(attackRangeShort), int(attackRangeLong)
+                rangedAttack = { **attack, 'shortRange': attackRangeShort, 'longRange': attackRangeLong }
+                rangedAttacks.append(rangedAttack)
+                rangedLongRange = max(rangedLongRange, attackRangeLong)
+                if attackRangeShort < rangedShortRange:
+                    rangedShortRange = attackRangeShort
+                break
+            
+    rangedOnlyMultiattacks = []
+    if currentMonsterMultiattacks:
+        for multiattack in currentMonsterMultiattacks:
+            rangedOnly = True
+            for attack in multiattack:
+                if not attack.name in [rangedAttack.name for rangedAttack in rangedAttacks]:
+                    rangedOnly = False
+                    break
+            if rangedOnly:
+                rangedOnlyMultiattacks.append(multiattack)
+    
+    closestTargetDistance = float('inf')
+    for combatant in availableTargets:
+        distance = getDistance(globals.currentMonster.name, combatant.name)
+        if distance < closestTargetDistance:
+            closestTarget = combatant
+            closestTargetDistance = distance
+
+    monsterCoordinates = convertCoordinatesToIndexes(combatantsMapInfo[globals.currentMonster.name]['location'])
+    targetCoordinates = convertCoordinatesToIndexes(combatantsMapInfo[closestTarget.name]['location'])
+    if closestTargetDistance == rangedShortRange:
+        bestTile = monsterCoordinates
+    else:
+        bestTile = goToTile(monsterCoordinates, targetCoordinates, abs(closestTargetDistance - rangedShortRange), closestTargetDistance < rangedShortRange)
+        
+    return closestTarget, bestTile
+
+def getAttackModifiersFromBasicConditions(attack, target):
+    modifiers = []
+    for effect in globals.currentMonster.effects:
+        if 'blinded' in effect.name.lower():
+            modifiers.append('dis')
+        elif 'frightened' in effect.name.lower():
+            modifiers.append('dis')
+        elif 'invisible' in effect.name.lower():
+            modifiers.append('adv')
+        elif 'poisoned' in effect.name.lower():
+            modifiers.append('dis')
+        elif 'prone' in effect.name.lower():
+            modifiers.append('dis')
+        elif 'restrained' in effect.name.lower():
+            modifiers.append('dis')
+    for effect in target.effects:
+        if 'blinded' in effect.name.lower():
+            modifiers.append('adv')
+        elif 'invisible' in effect.name.lower():
+            modifiers.append('dis')
+        elif 'paralyzed' in effect.name.lower():
+            modifiers.append('adv')
+            if getDistance(globals.currentMonster.name, target.name) <= 5:
+                modifiers.append('crit')
+        elif 'unconscious' in effect.name.lower():
+            modifiers.append('adv')
+            if getDistance(globals.currentMonster.name, target.name) <= 5:
+                modifiers.append('crit')
+        elif 'petrified' in effect.name.lower():
+            attackAutomation = attack.raw.automation
+            effectAutomations = [automation.effects for automation in attackAutomation if automation.type == 'target']
+            hitAutomations = [automation.hit for effectAutomation in effectAutomations for automation in effectAutomation if automation.type == 'attack']
+            damageStrings = [automation.damage for hitAutomation in hitAutomations for automation in hitAutomation if automation.type == 'damage']
+            damageTypes = []
+            for damageString in damageStrings:
+                damageTypeStringStartIndex = damageString.index('[') + 1
+                damageTypeStringEndIndex = damageString.index(']')
+                damageTypes.append(damageString[damageTypeStringStartIndex:damageTypeStringEndIndex])
+            for damageType in damageTypes:
+                modifiers.extend(['-resist', damageType])
+        elif 'prone' in effect.name.lower():
+            modifiers.append('adv' if getDistance(globals.currentMonster.name, target.name) <= 5 else 'dis')
+        elif 'restrained' in effect.name.lower():
+            modifiers.append('adv')
+        elif 'stunned' in effect.name.lower():
+            modifiers.append('adv')
+
+    return modifiers
+
+def performMeleeAttack(attack, target, modifiers='', aoo=False):
+    # Modifiers should be a string containing modifiers for the attack command like "-rr 3 -mc 10". These modifiers will override the modifiers generated in this function
+    attackCommandParts = ['i', 'aoo' if aoo else 'a', globals.currentMonster.name if aoo else '', f'"{attack.name}"', '-t', target.name]
+
+    # Check for regular conditions
+    attackCommandParts.extend(getAttackModifiersFromBasicConditions(attack, target))
+    return f"{' '.join(attackCommandParts)} {modifiers}"
+
+def performRangedAttack(attack, target, modifiers=''):
+    # Modifiers should be a string containing modifiers for the attack command like "-rr 3 -mc 10". These modifiers will override the modifiers generated in this function
+    attackCommandParts = ['i', 'a', f'"{attack.name}"', '-t', target.name]
+
+    # Check for regular conditions
+    attackCommandParts.extend(getAttackModifiersFromBasicConditions(attack, target))
+
+    # Check for enemies within 5ft
+    for combatant in combat().combatants:
+        if combatant.name != globals.currentMonster.name and (not isAutomatedMonster(combatant)) and 'location' in combatantsMapInfo[combatant.name] and getDistance(globals.currentMonster.name, combatant.name) <= 5:  # Combatant is a player or ally. Only consider manual targets if provided with '-t'
+            attackCommandParts.append('dis')
+            break
+
+    return f"{' '.join(attackCommandParts)} {modifiers}"
+
+def getBestMeleeAttacks(target):
+    result = []
+    distance = getDistance(globals.currentMonster.name, target.name)
+    maxMeleeRange = 0
+    meleeAttacks = [] # Object of { name, range }
+    for attack in currentMonsterAttacks:
+        for automation in attack.raw.automation:
+            if automation.type == 'text' and 'Melee' in automation.text and not '(1H)' in attack.name:
+                attackRange = int(automation.text[automation.text.find('reach ') + 6:automation.text.find(' ft.')])
+                meleeAttacks.append({ **attack, 'range': attackRange })
+                maxMeleeRange = max(maxMeleeRange, attackRange)
+                break
+            
+    if distance > maxMeleeRange:
+        return result
+    
+    elif currentMonsterMultiattacks and not 'aoo' in argList:
+        bestMultiattack = None  
+        bestMultiattackMaxReach = float('inf')
+        for multiattackOption in currentMonsterMultiattacks:
+            minReach = float('inf')
+            maxReach = 0
+            for attack in multiattackOption:
+                if attack.name in [meleeAttack.name for meleeAttack in meleeAttacks]:
+                    meleeAttack = [meleeAttack for meleeAttack in meleeAttacks if meleeAttack.name == attack.name][0]
+                    minReach = min(meleeAttack.range, minReach)
+                    maxReach = max(meleeAttack.range, maxReach)
+                else:   # Attack is a ranged attack
+                    maxReach = float('inf')
+            if minReach >= distance and (not bestMultiattack or maxReach < bestMultiattackMaxReach):
+                bestMultiattack = multiattackOption
+                bestMultiattackMaxReach = maxReach
+                
+        if bestMultiattack:
+            commands = []
+            for attack in bestMultiattack:
+                commands.append(performMeleeAttack(attack, target, modifiers=f'-rr {attack.num}'))
+            result.append({
+                'name': 'Multiattack',
+                'commands': commands
+            })
+        
+    if not result:
+        bestAttack = None
+        for meleeAttack in meleeAttacks:
+            if meleeAttack.range >= distance and (not bestAttack or meleeAttack.range < bestAttack.range):
+                bestAttack = meleeAttack
+        if bestAttack:
+            result.append({
+                'name': bestAttack.name,
+                'commands': [performMeleeAttack(bestAttack, target, aoo=('aoo' in argList))]
+            })
+    
+    return result
+
+def getBestRangedAttacks(target):
+    result = []
+    distance = getDistance(target.name, globals.currentMonster.name)
+    rangedAttacks = [] # Object of { name, shortRange, longRange }
+    shortestRangedAttack = None
+    rangedShortRange = float('inf')
+    rangedLongRange = 0
+    shortestDistanceLongRange = float('inf')    # The shortest distance long ranged attack that can be made (This assumed the monster cannot get close enough to make a short ranged attack)
+    
+    for attack in currentMonsterAttacks:
+        for automation in attack.raw.automation:
+            if automation.type == 'text' and 'Ranged' in automation.text:
+                rangeTextStartIndex = 0
+                if 'range ' in automation.text:
+                    rangeTextStartIndex = automation.text.find('range ') + 6
+                elif 'ranged ' in automation.text:
+                    rangeTextStartIndex = automation.text.find('ranged ') + 7
+                attackRangeAll = automation.text[rangeTextStartIndex : rangeTextStartIndex + automation.text[rangeTextStartIndex:].find(' ft.')]
+                attackRangeAll = attackRangeAll.split('/')
+                attackRangeShort = attackRangeAll[0]
+                if len(attackRangeAll) > 1:
+                    attackRangeLong = attackRangeAll[1]
+                else:
+                    attackRangeLong = attackRangeShort
+                attackRangeShort, attackRangeLong = int(attackRangeShort), int(attackRangeLong)
+                rangedAttack = { **attack, 'shortRange': attackRangeShort, 'longRange': attackRangeLong }
+                rangedAttacks.append(rangedAttack)
+                rangedLongRange = max(rangedLongRange, attackRangeLong)
+                if attackRangeShort < rangedShortRange:
+                    shortestRangedAttack = rangedAttack
+                    rangedShortRange = attackRangeShort
+                break
+            
+    if distance > rangedLongRange:
+        return result
+    
+    rangedOnlyMultiattacks = []
+    if currentMonsterMultiattacks:
+        for multiattack in currentMonsterMultiattacks:
+            rangedOnly = True
+            for attack in multiattack:
+                if not attack.name in [rangedAttack.name for rangedAttack in rangedAttacks]:
+                    rangedOnly = False
+                    break
+            if rangedOnly:
+                rangedOnlyMultiattacks.append(multiattack)
+        
+    if distance <= rangedShortRange:
+        if len(rangedOnlyMultiattacks) > 0:
+            bestMultiattack = None
+            for multiattack in rangedOnlyMultiattacks:
+                if shortestRangedAttack.name in [attack.name for attack in multiattack]:
+                    bestMultiattack = multiattack
+                    break
+            if bestMultiattack:
+                commands = []
+                for attack in bestMultiattack:
+                    commands.append(performRangedAttack(attack, target, modifiers=f'-rr {attack.num}'))
+                result.append({
+                    'name': 'Multiattack',
+                    'commands': commands
+                })
+        
+        if not result:
+            result.append({
+                'name': shortestRangedAttack.name,
+                'commands': [performRangedAttack(shortestRangedAttack, target)]
+            })
+        
+    else:
+        if distance <= rangedLongRange:
+            if len(rangedOnlyMultiattacks) > 0:
+                bestMultiattack = None
+                bestMultiattackMaxShortRange = float('inf')
+                for multiattackOption in rangedOnlyMultiattacks:
+                    minLongRange = float('inf')
+                    maxShortRange = 0
+                    for attack in multiattackOption:
+                        rangedAttack = [rangedAttack for rangedAttack in rangedAttacks if rangedAttack.name == attack.name][0]
+                        minLongRange = min(rangedAttack.longRange, minLongRange)
+                        maxShortRange = max(rangedAttack.shortRange, maxShortRange)
+                if (not bestMultiattack or maxShortRange < bestMultiattackMaxShortRange) and minLongRange >= shortestDistanceLongRange:
+                    bestMultiattack = multiattackOption
+                    bestMultiattackMaxShortRange = maxShortRange
+                
+                if bestMultiattack:
+                    commands = []
+                    for attack in bestMultiattack:
+                        commands.append(f'i a "{attack.name}" -t "{target.name}" -rr {attack.num} dis')
+                    result.append({
+                        'name': 'Multiattack',
+                        'commands': commands
+                    })
+                    
+            if not result:
+                shortestRangedAttackWithinRange = None
+                for rangedAttack in rangedAttacks:
+                    if not shortestRangedAttackWithinRange or rangedAttack.longRange < shortestRangedAttackWithinRange.longRange:
+                        shortestRangedAttackWithinRange = rangedAttack
+                    
+                result.append({
+                    'name': shortestRangedAttackWithinRange.name,
+                    'commands': [f'i a "{shortestRangedAttackWithinRange.name}" -t "{target.name}" dis']
+                })
+    
+    return result
+
+#* Main adaptive monster logic
+def basic():
+    actions = []
+    finalTile = None
+    currentMonsterInfo = None
+    speeds = {}
+
+    monsterSize = combatantsMapInfo[globals.currentMonster.name].get('size', 'M')[0].upper()
+    monsterSizeMultiplier = getSizeMultiplier(monsterSize)
+    maxX = mapX - monsterSizeMultiplier + 1
+    maxY = mapY - monsterSizeMultiplier + 1
+    viableTiles.clear()
+    viableTiles.extend([(x, y) for y in range(maxY) for x in range(maxX)] if not 'aoo' in argList else [convertCoordinatesToIndexes(combatantsMapInfo[globals.currentMonster.name]['location'])])
+    
+    def meleeMonster():
+        result = []
+        currentTile = convertCoordinatesToIndexes(combatantsMapInfo[globals.currentMonster.name]['location'])
+        
+        target, bestMeleeTile = getClosestViableMeleeTargetAndTile()
+        if bestMeleeTile:
+            currentTile = goToTile(currentTile, bestMeleeTile, max(speeds.values()))
+            combatantsMapInfo[globals.currentMonster.name]['location'] = convertCoordinatesToAlphanumeric(currentTile)
+            result.extend(getBestMeleeAttacks(target))
+            if not result:
+                currentTile = goToTile(currentTile, bestMeleeTile, max(speeds.values()))
+                result.append(basicActions.dash)
+        elif target:
+            currentTile = goToTile(currentTile, convertCoordinatesToIndexes(combatantsMapInfo[target.name]['location']), max(speeds.values())*2)
+            result.append(basicActions.dash)
+        else:
+            result.append(basicActions.dodge)
+                
+        return currentTile, result
+
+    def rangedMonster():
+        result = []
+        currentTile = convertCoordinatesToIndexes(combatantsMapInfo[globals.currentMonster.name]['location'])
+        
+        target, bestRangedTile = getClosestViableRangedAttackTargetAndTile()
+        if bestRangedTile:
+            currentTile = goToTile(currentTile, bestRangedTile, max(speeds.values()))
+            combatantsMapInfo[globals.currentMonster.name]['location'] = convertCoordinatesToAlphanumeric(currentTile)
+            result.extend(getBestRangedAttacks(target))
+            if not result:
+                result.append(basicActions.dash)
+                currentTile = goToTile(currentTile, bestRangedTile, max(speeds.values()))
+        # elif target:
+        #     result.append(basicActions.dash)
+        #     currentTile = goToTile(currentTile, convertCoordinatesToIndexes(combatantsMapInfo[target.name]['location']), max(speeds.values()))
+        else:
+            result.append(basicActions.dodge)
+                
+        return currentTile, result
+
+    def meleeAndRangedMonster():
+        result = []
+        currentTile = convertCoordinatesToIndexes(combatantsMapInfo[globals.currentMonster.name]['location'])
+        # Assume for now that monster always favours melee
+        target, bestMeleeTile = getClosestViableMeleeTargetAndTile()
+        if bestMeleeTile:
+            currentTile = goToTile(currentTile, bestMeleeTile, max(speeds.values()))
+            combatantsMapInfo[globals.currentMonster.name]['location'] = convertCoordinatesToAlphanumeric(currentTile)
+            result.extend(getBestMeleeAttacks(target))
+            if not result:
+                result.extend(getBestRangedAttacks(target))
+        elif target:
+            currentTile = goToTile(currentTile, convertCoordinatesToIndexes(combatantsMapInfo[target.name]['location']), max(speeds.values()))
+            combatantsMapInfo[globals.currentMonster.name]['location'] = convertCoordinatesToAlphanumeric(currentTile)
+            result.extend(getBestRangedAttacks(target))
+        if not result:
+            result.append(basicActions.dodge)
+                
+        return currentTile, result
+
+    # Check for effects that prevent actions
+    for effect in globals.currentMonster.effects:
+        if 'incapacitated' in effect.name.lower():
+            actions.append(basicActions.incapacitated)
+            return combatantsMapInfo[globals.currentMonster.name]['location'], actions
+        elif 'paralyzed' in effect.name.lower():
+            actions.append(basicActions.incapacitated)
+            return combatantsMapInfo[globals.currentMonster.name]['location'], actions
+        elif 'petrified' in effect.name.lower():
+            actions.append(basicActions.incapacitated)
+            return combatantsMapInfo[globals.currentMonster.name]['location'], actions
+        elif 'stunned' in effect.name.lower():
+            actions.append(basicActions.incapacitated)
+            return combatantsMapInfo[globals.currentMonster.name]['location'], actions
+        elif 'unconscious' in effect.name.lower():
+            actions.append(basicActions.incapacitated)
+            return combatantsMapInfo[globals.currentMonster.name]['location'], actions
+        elif 'charmed (hypnotic pattern)' in effect.name.lower():
+            actions.append(basicActions.incapacitated)
+            return combatantsMapInfo[globals.currentMonster.name]['location'], actions
+
+    currentMonsterInfo = getMonsterInfo(globals.currentMonster.monster_name)
+    if not currentMonsterInfo:
+        desc.append(f"-# *Could not retrieve monster info for {globals.currentMonster.name}. Using defaults*")
+
+    currentMonsterAttacks.clear()
+    currentMonsterAttacks.extend(getCombatantAttacks(globals.currentMonster))
+    currentMonsterMultiattacks.clear()
+    currentMonsterMultiattacks.extend(getMultiattackOptions(currentMonsterInfo))
+
+    if 'aoo' in argList:
+        speeds = {
+            'walk': 0
+        }
+    else:
+        speeds = { 'walk': 30 }
+        if currentMonsterInfo:
+            speeds = currentMonsterInfo.get('speed', speeds)
+            for key, speed in speeds.items():
+                if typeof(speed) == 'SafeDict':
+                    speeds.update({ key: speed.number }) # Some speeds are represented in the form of ('fly': {'number': 80, 'condition': '(hover)'}) instead of ('fly': 80)
+        if args.get('s'):
+            mod = args.last('s')
+            if mod[0].lower() == 'x':
+                multiplier = mod[1:]
+                try:
+                    multiplier = float(multiplier)
+                    for key, speed in speeds.items():
+                        speeds.update({ key: int(speed * multiplier) })
+                except:
+                    err(f"'{args.last('s')}' is not a valid multiplier!")
+            else:
+                try:
+                    fixSpeed = int(args.last('s'))
+                    speeds = { 'walk': fixSpeed }
+                except:
+                    err(f"'{args.last('s')}' is not a valid speed!")
+
+        # Check for conditions that affect speed
+        for effect in globals.currentMonster.effects:
+            if 'grappled' in effect.name.lower():
+                for speedType in speeds:
+                    speeds.update({ speedType: 0 })
+            elif 'prone' in effect.name.lower():
+                for speedType in speeds:
+                    speeds.update({ speedType: int(speeds[speedType] / 2) })
+                actions.append(basicActions.stand)
+                actions.append(f'i re {globals.currentMonster.name} Prone')
+            elif 'restrained' in effect.name.lower():
+                for speedType in speeds:
+                    speeds.update({ speedType: 0 })
+
+    hasMelee = False
+    hasRanged = False
+    for attack in currentMonsterAttacks:
+        for automation in attack.raw.automation:
+            if automation.type == 'text':
+                hasMelee = hasMelee or 'Melee' in automation.text
+                hasRanged = hasRanged or 'Ranged' in automation.text
+                break
+            
+    if 'aoo' in argList:
+        hasRanged = False
+        actions.extend(getBestMeleeAttacks(availableTargets[0]))
+    else:
+        originalLocation = combatantsMapInfo[globals.currentMonster.name]['location']
+        avoidStandingInSpaceWithCombatants(currentMonsterInfo)
+        if hasMelee and hasRanged:
+            finalTile, tempActions = meleeAndRangedMonster()    
+            actions.extend(tempActions)        
+        elif hasMelee:
+            finalTile, tempActions = meleeMonster()
+            actions.extend(tempActions)
+        elif hasRanged:
+            finalTile, tempActions = rangedMonster()
+            actions.extend(tempActions)
+        combatantsMapInfo[globals.currentMonster.name]['location'] = originalLocation
+
+    return finalTile, actions
+
+#* End Setup Functions
+#endregion
+
+#*region Setup Variables
+baseHelpGvar = "7bcc3b2f-9b5b-4a1b-9e2f-f979cd21510c"
+customHelpGvar = "28f88a58-a121-4444-bd65-acd3bdebd73c"
+
+baseTitle = "**:space_invader: AMIMO: Automated Monsters Integrating !map and OTFBM :space_invader:**"
+baseDesc = ""
+baseFooter = "!amimo help | By @mehmango"
+
+maxAutomatedMonsters = 6
+if 'o' in argList or 'aoo' in argList:
+    maxAutomatedMonsters = 1
+elif '-limit' in argList and str(args.last('limit')).isnumeric():
+    maxAutomatedMonsters = int(args.last('limit'))
+
+automationLimitReached = False
+monstersToAutomate = []
+playerTurn = False
+finalCommands = []
+filteredArgList = []
+viableTiles = []
+basicActions = {}
+TILE_SIZE = 5
+availableTargets = []
+currentMonsterMultiattacks = []
+currentMonsterAttacks = []
+actions = []
+
+globals = {
+    'currentMonster': None
+}
+
+# Filter combatantsMapInfo args we don't want to copy onto a resultant `!i a` command
+filteredArgList = [a for a in argList]
+if any(filteredArg in argList for filteredArg in ['-t']):
+    tIndexes = [i for i in range(len(filteredArgList)) if filteredArgList[i] == '-t']
+    targets = args.get('t')
+    for i in range(len(tIndexes)):
+        target = targets[i]
+        filteredArgList.pop(tIndexes[i] - i*2)  # i*2 accounts for popping of previous elements (we pop 2 elements per '-t' arg. If -t arg value is True, we won't do more than one loop anyway)
+        if target != 'True':  # Don't consider ['True']
+            filteredArgList.pop(tIndexes[i] - i*2)
+basicActions = {
+    "dodge": {
+        'name': 'Dodge',
+        'commands': ['''tembed {{ return f""" -title "{'' + combat().current.name + ' Dodges!'}" -desc 'When you take the Dodge action, you focus entirely on avoiding attacks. Until the start of your next turn, any attack roll made against you has disadvantage if you can see the attacker, and you make Dexterity saving throws with advantage. You lose this benefit if you are incapacitated or if your speed drops to 0.' """ }}''']
+    },
+    "dash": {
+        'name': 'Dash',
+        'commands': ['''tembed {{ return f""" -title "{'' + combat().current.name + ' Dashes!'}" -desc 'When you take the Dash action, you gain extra movement for the current turn. The increase equals your speed, after applying any modifiers. Any increase or decrease to your speed changes this additional movement by the same amount.' """ }}''']
+    },
+    "disengage": {
+        'name': 'Disengage',
+        'commands': ['''tembed {{ return f""" -title "{'' + combat().current.name + ' Disengages!'}" -desc 'If you take the Disengage action, your movement doesn’t provoke opportunity attacks for the rest of the turn.' """ }}''']
+    },
+    "hide": {
+        'name' : 'Hide',
+        'commands': ['''tembed {{ return f""" -title "{'' + combat().current.name + ' Hides!'}" -desc 'When you take the Hide action, you make a Dexterity (Stealth) check in an attempt to hide, following the rules for hiding. If you succeed, you gain certain benefits, as described in the “Unseen Attackers and Targets” section.' """ }}', 'i c Stealth''']
+    },
+    "help": {
+        'name': 'Help',
+        'commands': []},
+    "ready": {
+        'name': 'Ready',
+        'commands': []
+    },
+    "search": {
+        'name': 'Search',
+        'commands': []
+    },
+    "use": {
+        'name': 'Use',
+        'commands': [] 
+    },
+    "stand": {
+        'name': 'Stand Up',
+        'commands': ['''tembed {{ return f""" -title "{'' + combat().current.name + ' Stands Up!'}" -desc 'You use half your movement speed to stand up, removing the Prone condition.' """}}''']
+    },
+    "incapacitated": {
+        'name': 'Incapacitated',
+        'commands': ['''tembed {{ return f""" -title "{'' + combat().current.name + ' is Incapacitated!'}" -desc 'An incapacitated creature can’t take actions or reactions.' """}}''']
+    }
+}
+
+if 'help' in argList:
+    if 'custom' in argList:
+        baseDesc = f"""{get_gvar(customHelpGvar).replace('!!', ctx.prefix)}"""
+    else:
+        baseDesc = f"""{get_gvar(baseHelpGvar).replace('!!', ctx.prefix)}"""
+    return
+if not c:
+    baseDesc = "**:warning: Error: Channel is not in combat**"
+    return
+if not c.current:
+    baseDesc = "**:warning: Error: There is no active combatant**"
+    return
+if not (c.current.name.lower() in ['dm', 'map', 'lair'] or c.current.type == 'group' or isAutomatedMonster(c.current) or 'aoo' in argList):
+    baseDesc = "**:warning: Error: The current combatant is not an enemy monster**"
+    return
+if c.current.type == 'group':
+    for combatant in c.current.combatants:
+        if not isAutomatedMonster(combatant):
+            baseDesc = "**:warning: Error: Make sure the current group only has enemy monsters in it**"
+            return
+
+deadMonstersToRemove = []
+for combatant in c.combatants:
+    if isAutomatedMonster(combatant) and combatant.hp <= 0 and 'location' in combatantsMapInfo[combatant.name]:
+        combatantsMapInfo[combatant.name].pop('location')  # Don't consider dead monsters for anything
+        deadMonstersToRemove.append(combatant)
+if len(deadMonstersToRemove) > 0:
+    baseDesc += "**__Removing dead monsters:__**"
+    for monster in deadMonstersToRemove:
+        baseDesc += f"\n- {monster.name}"
+
+#* End Setup Variables
+#endregion
+def getAutomationOutputEmbed(title='', desc='', outputMap=None):
+    return f'''tembed -title "{title}" -desc "{desc}" -footer "!amimo help | By @mehmango{f" | Map settings attached to {mapattach.name}" if mapattach else ""}" {f'-image "{outputMap}" -f "[Map]({outputMap})"' if outputMap else ''} '''
+
+numAutomatedMonsters = 0
+currentMonsterIndex = 0
+combatants = c.combatants
+firstCombatant = c.current
+if 'aoo' in argList:
+    # Set combatant perform ing aoo
+    if len(argList) <= argList.index('aoo') + 1:
+        baseDesc = "**:warning: Error: No attacker for the opportunity attack specified. Use `aoo <attacker>` to specify the attacker**"
+        return
+    attacker = c.get_combatant(argList[argList.index('aoo') + 1])
+    if not attacker or attacker.type != 'combatant':
+        baseDesc = "**:warning: Error: Attacker not found**"
+        return
+    firstCombatant = attacker
+if firstCombatant.type == 'group':
+    currentMonsterIndex = [_combatant.name for _combatant in c.combatants].index(firstCombatant.combatants[0].name)
+else:
+    currentMonsterIndex = [_combatant.name for _combatant in c.combatants].index(firstCombatant.name)
+combatants = c.combatants[currentMonsterIndex:] + c.combatants[:currentMonsterIndex]    # Rotate combatants so that the current combatant is first
+
+currentMonsterIndex = 0
+while currentMonsterIndex < len(combatants):
+    current = combatants[currentMonsterIndex]
+    if current.group and combatantsMapInfo[current.name].get('automated'):
+        allAutomated = True
+        for combatant in c.get_group(current.group).combatants:
+            if not combatantsMapInfo[combatant.name].get('automated'):
+                # There is another monster in this group that has not been automated yet. Skip to that monster
+                allAutomated = False
+                currentMonsterIndex = [_combatant.name for _combatant in combatants].index(combatant.name)
+                current = combatants[currentMonsterIndex]
+                break
+
+        if allAutomated:
+            # All monsters in this group have been automated last round. Reset automated status for all monsters in this group
+            for combatant in c.get_group(current.group).combatants:
+                combatantsMapInfo[combatant.name].pop('automated')
+
+    if numAutomatedMonsters >= maxAutomatedMonsters and 'aoo' in argList:
+        finalCommands.append(getAutomationOutputEmbed(':space_invader: Automation complete! :space_invader:'))
+        break
+    
+    elif isAutomatedMonster(current):
+        if numAutomatedMonsters >= maxAutomatedMonsters:
+            if 'o' in argList or '-limit' in argList:
+                finalCommands.append(getAutomationOutputEmbed(':space_invader: Automation complete! :space_invader:'))
+            else:
+                finalCommands.append(getAutomationOutputEmbed(':dizzy_face: Automation limit reached! :dizzy_face:', f'**Run `{ctx.prefix}amimo` again to continute monster automation.**'))
+            break
+        
+        # ****************************************************************************************
+        # *     Automate current monster
+        # ****************************************************************************************
+
+        currentMonster = current
+        globals['currentMonster'] = currentMonster
+        initCommands = []
+        overlays = []
+        outputTitle = f"**:space_invader: Automating {currentMonster.name} :space_invader:**"
+        outputDesc = ""
+
+        if currentMonster.hp <= 0:
+            outputDesc += f"\n\n**:skull: Skipping dead monster.**"
+
+        elif not 'location' in combatantsMapInfo[currentMonster.name]:
+            outputDesc += f"\n\n**:warning: Error: {currentMonster.name} is not on the map.\nRun `!map -t '{currentMonster.name}'|<location>` to place it on the map, then run this command again.**"
+            finalCommands.append(getAutomationOutputEmbed(outputTitle, outputDesc))
+            break
+
+        else:
+            if 'aoo' in argList:
+                manualTarget = argparse(argList).last('t')
+                target = combat().get_combatant(manualTarget)
+                # if manualTarget and target.type == 'group':
+                #     outputDesc += "\n\n**:warning: Current combatant is in a group. If you are trying to perform an attack of opportunity against a combatant in a group, use `-t` to specify the target.**"
+                #     break
+                if not manualTarget and combat().current.type == "combatant" and combat().current.name != currentMonster.name:    # If no target specified, see if current combatant is a valid target
+                    target = combat().current
+                if target and target.type == 'combatant':
+                    availableTargets.append(target)
+                else:
+                    if manualTarget:
+                        outputDesc += f"\n\n**:warning: Cannot find the specified target '{manualTarget}'!**"
+                        finalCommands.append(getAutomationOutputEmbed(outputTitle, outputDesc))
+                    else:
+                        outputDesc += "\n\n**:warning: Specified monster cannot make an attack of opportunity against the current combatant!**"
+                        finalCommands.append(getAutomationOutputEmbed(outputTitle, outputDesc))
+                    break
+            else:
+                manualTargets = argparse(argList).get('t')
+                for combatant in combat().combatants:
+                    if combatant.name != currentMonster.name and (not isAutomatedMonster(combatant)) and 'location' in combatantsMapInfo[combatant.name] and (len(manualTargets) <= 0 or any(manualTarget.lower() in combatant.name.lower() for manualTarget in manualTargets)):  # Combatant is a player or ally. Only consider manual targets if provided with '-t'
+                        availableTargets.append(combatant)
+                if len(availableTargets) < 1:
+                    outputDesc += "\n\n**:warning: No players or allies found. If you specified targets using '-t', make sure that they are valid targets.**"
+                    finalCommands.append(getAutomationOutputEmbed(outputTitle, outputDesc))
+                    break
+                
+            availableTargets = randchoices(availableTargets, k=len(availableTargets))   # Shuffle available targets for target randomisation
+
+            finalTile, actions = basic()
+            destination = convertCoordinatesToAlphanumeric(finalTile) if finalTile else None
+
+            if destination:
+                prevLoc = combatantsMapInfo[currentMonster.name].get('location')
+                # Fix bad locations?
+                if prevLoc == "TRUE":
+                    _ = combatantsMapInfo[currentMonster.name].pop('location')
+                    prevLoc = None
+                # Did they have a previous location? If so, lets calculate distance and draw a line
+                if prevLoc and prevLoc.lower() != destination.lower():
+                    distance = getDistance(prevLoc, destination)
+                    # Grab the targets new color if changed, old color if set, or default to dark violet
+                    colr = (combatantsMapInfo[currentMonster.name].get(
+                        'color', 'r') + " ").strip("#~").lower()
+                    colr = colr[:colr.index(" ")]
+                    if len(colr) in (3, 6) and not colr.strip("abcdef1234567890"):
+                        colr = f"~{colr}"
+                    # Add the line to the overlay list
+                    overlays.append(
+                        f"*a{distance}{colr}{prevLoc}{destination}")
+                    # Display the change in location
+                    outputDesc += f"Moving {currentMonster.name} from {prevLoc} to {destination.upper()} ({f'~{distance}' if bool(get_svar('trueDistance') or get('trueDistance')) else distance} ft.)."
+                elif not prevLoc:
+                    # Display the change in location    
+                    outputDesc += f"Moving {currentMonster.name} to {destination.upper()}."
+                combatantsMapInfo[currentMonster.name].update({"location": destination.upper()})
+
+            if actions:
+                for action in actions:
+                    for command in action.commands:
+                        #TODO: Move this to performMeleeAttack and performRangedAttack
+                        if 'i a' in command or 'i aoo' in command:
+                            # Handle attacks
+                            if currentMonster.group and len(c.get_group(currentMonster.group).combatants) > 1:
+                                # Specify group member attacking (Eg: Scimitar (BA2))
+                                indexToInsert = command.find('" ') # Attack names should always be surrounded by parantheses
+                                command = command[:indexToInsert] + f' ({currentMonster.name})' + command[indexToInsert:]
+                            if len(filteredArgList) > 0:
+                                command += ' ' + ' '.join(filteredArgList) # Add all modifiers
+                            commandArgs = argparse(command)
+                            targetNames = commandArgs.get('t')
+                            for modifier in args.get('m'):
+                                keywords = modifier.split('|')
+                                if any(keywords[0].lower() in targetName.lower() for targetName in targetNames):
+                                    # Apply modifiers applicable to target
+                                    #* Any modifier applied to one target of the attack will also be applied to all other targets. Use with caution
+                                    commandModifiers = ' '.join(keywords[1:])
+                                    command += ' ' + commandModifiers
+                                    
+                        initCommands.append(command)
+
+        if not 'aoo' in argList:
+            if not currentMonster.group:
+                initCommands.append('i n')
+            else:
+                combatantsMapInfo[currentMonster.name].update({'automated': True})
+                # Don't go to next turn if monster is in a group and is not the last combatant in the group
+                group = c.get_group(currentMonster.group)
+                monsterIndex = 0
+                for i in range(len(group.combatants)):
+                    if group.combatants[i].name == currentMonster.name:
+                        monsterIndex = i
+                        break
+                if monsterIndex == len(c.get_group(currentMonster.group).combatants) - 1:
+                    initCommands.append('i n')
+
+        finalMap = getOTFBMUrl()
+        finalCommands.append(getAutomationOutputEmbed(outputTitle, outputDesc, finalMap))
+        finalCommands.extend(initCommands)
+
+        # ****************************************************************************************
+        # *     End automate current monster
+        # ****************************************************************************************
+
+        currentMonsterIndex += 1
+        numAutomatedMonsters += 1
+
+    elif current.name.lower() in ['dm', 'map', 'lair']:
+        # Skip DM, Map, and Lair
+        finalCommands.append('i n')
+        currentMonsterIndex += 1
+    else:
+        finalCommands.append(getAutomationOutputEmbed(':space_invader: Automation complete! :space_invader:', ':video_game: It is a player turn now!'))
+        break
+
+# ****************************************************************************************
+# *     End of AI Implementation
+# ****************************************************************************************
+
+</drac2>
+
+</drac2>
+<drac2>
+if len(debugMessages):
+    err(newline.join(debugMessages))
+    return f"""-desc {(newline.join(debugMessages))} """
+else:
+    output = f""" -title "{baseTitle}" -desc "{baseDesc}" -footer "{baseFooter}" """
+    if not 'help' in argList and finalCommands:
+        output += f"{newline}{ctx.prefix}{f'{newline}{ctx.prefix}'.join(finalCommands)}"
+    return output
+</drac2>
+-color < color >

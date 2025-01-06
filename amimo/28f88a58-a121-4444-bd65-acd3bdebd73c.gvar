@@ -1,0 +1,22 @@
+**⚙️ __Modifiers__**
+Arguments and modifiers used after `!!amimo` will be passed onto any attack that results from the automation (With the exception of `-t`, specified below).
+
+For example, if using:
+`!!amimo` 
+would have resulted in the command:
+`!!i a Sword -t Bob`,
+
+using:
+`!!amimo adv -b 1d4`
+would have instead resulted in:
+`!!i a Sword -t Bob adv -b 1d4`
+
+**🎯 __Manual Targeting__**
+Adding a `-t` argument will specify the targets the current monster will consider as valid targets. More than one target can be specified.
+*(Eg: `!!amimo -t Bob -t Ross` will make the current monster only consider Bob and Ross as valid targets.)*
+ 
+**🚩 __Combatant-specific Modifiers__**
+Sometimes a monster should have advantage against one target but not another, but you also don't want to decide which target the monster ends up attacking.
+
+Use `-m <target_name>[|modifier...]` to specify modifiers that will only apply to the target. More than one modified target and modifier per target can be specified. This argument is very versatile, and should be used with care.
+*(Eg: `!!amimo -m Bob|adv|'-d 1d10' -m Ross|'-t John'` will give the monster advantage and a 1d10 damage bonus against Bob. Additionally, if the monster attacks Ross, it will also make the same attack against John)*
