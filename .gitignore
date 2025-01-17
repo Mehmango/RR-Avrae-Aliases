@@ -127,10 +127,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-1c39ee5d-0ff6-42e3-89a9-cda963feef7e.gvar
-39d74420-858f-4d6a-be4e-832157868bce.gvar
-bb36a4a9-59fb-4224-bdc4-81fd5ecfc25c.gvar
-ce493282-a951-491b-9845-fff51cb7631b.gvar
 forcedShift.alias
 forcedShift.md
 fragment.alias
@@ -183,3 +179,8 @@ tetherDamage.alias
 tetherDamage.md
 tt.alias
 tt.md
+stonks gvars/backup/market/1c39ee5d-0ff6-42e3-89a9-cda963feef7e.gvar
+stonks gvars/backup/player/232847e9-2e6b-4a40-b269-8509077a2ad6.gvar
+stonks gvars/live/market/2fe476e1-52f0-406e-a7d0-3a4c3c14aff0.gvar
+stonks gvars/live/player/387f6c45-f072-412e-8933-255b9a503466.gvar
+ttt gvars/stages/bb36a4a9-59fb-4224-bdc4-81fd5ecfc25c.gvar

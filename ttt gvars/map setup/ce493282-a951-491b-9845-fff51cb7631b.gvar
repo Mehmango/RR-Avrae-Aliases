@@ -1,0 +1,433 @@
+tembed
+<drac2>
+argList = []
+
+# **********************
+# *** Base Variables ***
+# **********************
+
+args = argparse(argList)
+
+defaults = load_json(get_svar("mapDefaults") or "{}") or {}
+mapsize = defaults.get("size", "10x10") or "10x10"
+maxSize = 99
+if mapsize != "JSON":
+    mapSplitX, mapSplitY = mapsize.lower().split('x')
+    mapX = max(min(int(mapSplitX) if mapSplitX.isdigit() else 1, maxSize), 1)
+    mapY = max(min(int(mapSplitY) if mapSplitY.isdigit() else 1, maxSize), 1)
+    mapsize = f"{mapX}x{mapY}"
+mapoptions = defaults.get("options", "")
+mapbg = defaults.get("background", "")
+mapinfo = {}
+mapview = ""
+mapviewsize = ""
+mapviewlocation = ""
+mapattach = None
+map = get("otfbm_base_url", "http://otfbm.io/")
+walls = []
+objects = []
+loadedjson = []
+fow = []
+targ = None
+combatantsMapInfo = {}
+baseAlph = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+alph = []
+for index in range(maxSize):
+    letter = ""
+    if index // 26:
+        letter = baseAlph[(index // 26) - 1]
+    letter += baseAlph[index % 26]
+    alph.append(letter)
+presetObjects = load_json(get_gvar("9b15344a-1f09-43b5-b84e-f61e32e4a89a"))
+overlays = []
+spelllist = []
+c = combat()
+gt = c.get_combatant if c else None
+debugMessages = []
+desc = []
+finalMap = ""
+sizeOffset = {"T": 0, "S": 0, "M": 0, "L": 1, "H": 1, "G": 2}
+COL, SIZ = {"w": "white", "bk": "black", "gy": "grey", "r": "red", "g": "green", "b": "blue", "y": "yellow", "p": "purple", "pk": "pink",
+            "c": "cyan", "bn": "brown", "o": "orange"}, {"T": "Tiny", "S": "Small", "M": "Medium", "L": "Large", "H": "Huge", "G": "Gargantuan"}
+
+# We don't have an aim point/target yet
+aimPoint = ""
+aimTarget = ""
+targAimPoint = ""
+targAimTarget = ""
+aimStick = False
+targPoint = ""
+aim = ""
+effect = None
+effectName = ""
+effectTarget = ""
+prevLoc = ""
+
+# F-Strings like to yell at me for \'s
+newline, targD, aimD, quote = "\n", "{targ}", "{aim}", '\\"'
+
+# What characters do we need to strip from names?
+nameStrip = r"""'"()[]{}*?^%$&#/-_~“”‘’"""
+</drac2>
+
+<drac2>
+# Pulling up tokenlist to view all created tokens
+serverTokens = load_json(get_svar('mapTokens') or '{}')
+userTokens = load_json(get('mapTokens', '{}'))
+serverTokens.update(userTokens)
+userTokens = serverTokens
+tokenlist = [f"""**{tokens}** - `{str(over).replace('"',quote)}`""" for tokens,
+             over in userTokens.items() if args.last('search', '').lower() in tokens.lower()]
+tokenPagin = [tokenlist[i:i+20] for i in range(0, len(tokenlist), 20)]
+</drac2>
+
+<drac2>
+# If we're in combat, check all the things
+if c:
+    # Collect information on every combatant
+    for combatant in combat().combatants:
+        # Grab map information, if it exists
+        for attack in combatant.attacks:
+            if attack.name == 'map':
+                mapattach = combatant
+                mapinfo = attack.raw.automation[-1].text
+                break
+        if mapattach:
+            break
+</drac2>
+
+<drac2>
+if c:
+    # If we found a `map` attack with information, parse it now
+    if mapinfo:
+        # Split and convert to dict. Couldn't use | here because of how -attack effects are parsed
+        mapinfo = mapinfo.split(' ~ ')
+        mapinfo = {x[0].lower(): x[1] for x in [item.split(': ')
+                                                for item in mapinfo]}
+        if mapinfo.get('size') == None:
+            mapsize = defaults.get("size", "10x10") or "10x10"
+        else:
+            mapsize = mapinfo.get('size')
+        # If user hasn't set mapsize = "JSON" then continue
+        if mapsize != "JSON":
+            if ":" in mapsize:
+                mapLocSize = mapsize.split(':')
+                mapviewlocation = f"{mapLocSize[0]}:"
+                mapsize = mapviewsize = mapLocSize[1]
+            if mapsize[0].isdigit():
+                mapSplitX, mapSplitY = mapsize.lower().split('x')
+                mapX = min(int(mapSplitX) if mapSplitX.isdigit()
+                           else 1, maxSize)
+                mapY = min(int(mapSplitY) if mapSplitY.isdigit()
+                           else 1, maxSize)
+            else:
+                mapX = alph.index(''.join(x.upper()
+                                  for x in mapsize if x.isalpha()))
+                mapY = int(''.join(y for y in mapsize if y.isdigit()))
+            mapsize = f"{mapX}x{mapY}"
+        mapbg = mapinfo.get('background')
+        mapoptions = mapinfo.get('options')
+        walls = mapinfo.get('walls')
+        walls = walls.split(', ') if walls else []
+        objects = mapinfo.get('objects')
+        objects = objects.split('/') if objects else []
+        loadedjson = mapinfo.get('json')
+        loadedjson = loadedjson.split(', ') if loadedjson else []
+        fow = mapinfo.get('fow')
+        fow = fow.split(', ') if fow else []
+        if mapinfo.get('view'):
+            mapviewlocation, mapviewsize = mapinfo.get(
+                'view').replace('::', ':').split(':')
+</drac2>
+
+<drac2>
+if c:
+    # Read each combatants notes for their information
+    for target in combat().combatants:
+        # If they have a note, perse it into a dict
+        if target.note and ':' in target.note:
+            note = target.note
+            note = note.split(" | ")
+            note = {x[0].lower(): x[1] for x in [item.split(": ")
+                                                 for item in note]}
+            if note.get('location'):
+                note['location'] = note['location'].upper()
+            combatantsMapInfo[target.name] = note
+            # Check if we have any overlays attached to effects, and then if at effect exists
+            for overNum in [""]+[str(x) for x in range(1, 11)]:
+                if combatantsMapInfo[target.name].get('effect'+overNum):
+                    checkEffect, checkEffectTarget = combatantsMapInfo[target.name].get(
+                        'effect'+overNum).split(' / ')
+                    # If the effect (or the target it was on) are gone, remove the effect
+                    if not gt(checkEffectTarget) or not gt(checkEffectTarget).get_effect(checkEffect):
+                        _ = combatantsMapInfo[target.name].pop(
+                            'effect'+overNum) if 'effect'+overNum in combatantsMapInfo[target.name] else None
+                        _ = combatantsMapInfo[target.name].pop(
+                            'aim'+overNum) if 'aim'+overNum in combatantsMapInfo[target.name] else None
+                        _ = combatantsMapInfo[target.name].pop(
+                            'overlay'+overNum) if 'overlay'+overNum in combatantsMapInfo[target.name] else None
+                        desc.append(
+                            f"""Overlay {overNum} removed from `{target.name}` because effect `{checkEffect}` no longer present{f" on {checkEffectTarget}" if checkEffectTarget!=target.name else ""}.""")
+                        desc.append("")
+        elif target.note:
+            note = target.note
+            desc.append(
+                f"Found a incorrectly formatted note on {target.name}, reformatted as a `-note`. ")
+            combatantsMapInfo[target.name] = {"note": note.replace(
+                ':', ' ').replace('|', ' ')}
+        else:
+            combatantsMapInfo[target.name] = {}
+</drac2>
+
+<drac2>
+# Lets back up our map each time we run it, why not
+# This will back the entire `combatantsMapInfo` dictionary containing everyones positions and states
+# to a uvar named mapStates, with the current channels id added as s key inside it.
+# This way you won't accidentally overwrite your backup with the backup from another channel
+
+mapStates = load_json(get('mapStates', '{}'))
+prevBack = mapStates.get(str(ctx.channel.id))
+mapStates.update({str(ctx.channel.id): combatantsMapInfo})
+lengthTotal = len(dump_json(mapStates))
+if lengthTotal >= 8000:
+    delete_uvar("mapStates")
+    mapStates = {str(ctx.channel.id): combatantsMapInfo}
+    set_uvar('mapStates', dump_json(mapStates))
+    desc.append(f"The uvar `mapStates`, which contains information for `!map undo`, was full, so it was cleared and current map setup was backed up.")
+else:
+    mapStates.update({str(ctx.channel.id): combatantsMapInfo})
+    set_uvar('mapStates', dump_json(mapStates))
+# Clean up old uvars that are no longer needed
+delete_uvar("mapState"+str(ctx.channel.id))
+delete_uvar("mapSize"+str(ctx.channel.id))
+</drac2>
+
+<drac2>
+# Function declaration
+def getMonsterInfo(monsterName):
+    gvars = {
+        'a': ['3b3234da-bc76-40d3-81db-144a0c07b90f','4c2eaa22-fd0a-426e-8e3c-4fe40b2fe7dd','de9f65dd-cc66-47a9-92a1-c3ff33e89c6c','5be3548e-791f-430f-8004-8674cccd3c0c','d6c6d7d2-b618-41ae-af62-4d5d4ec844d1','1ef6c5b4-98ae-41fc-a2cc-b385f0463282','dfcef466-de65-4937-98d0-b457f39342d7','b9f2de37-e613-49ef-b6ed-7a96288e64c5','cdabcd32-c555-4f88-851e-93f2304dcf57','aa70de23-2ac9-4e38-9f77-4965fffaa218'],
+        'b': ['ec840753-e883-46b9-bb81-81eabc9b15ef','0e08581d-10b5-4e90-b00e-7fcf6cad493f','801b9e60-ec49-4e24-a27b-16541d599e98','3144a7bd-719a-489a-a9c3-8a93008a7b4e','c8a73239-8a16-4ffd-a329-f884b981ba0b','f9c953a1-ddd6-4a44-b802-51f47d0fd0ef'],
+        'c': ['3e0cf632-788a-4eeb-a92a-bbd5414024e6','b558b7f9-1e04-4267-8c75-f257ab575c5d','fb62cae5-f4e1-486c-b4f3-b160cd0376b2','e46ada97-a771-4dab-91a1-f0a065cca439','567a4aca-8dc3-406e-882b-dc4214b4fadb','027daf94-8fba-4be7-8aff-a6a1146d06e2'],
+        'd': ['df63d1f3-3374-4fe3-b81e-6e75e22ec952','a273d94d-b492-45ec-ad39-1abb0c096463','304962f9-9719-467a-b2bb-bfbc5bfbc229','8707509a-5540-45a7-a6d1-f561338ea0cb','5b7fc7f9-ef35-4173-ac5a-64623570c62f','f2850c54-8dd2-4227-84e5-3b2fc443abb5','50eebe6a-36c4-43a2-ac5b-fe75f49258f9','d68a92f8-f85d-46ab-9ab4-e724ba3b7785'],
+        'e': ['d397108d-bfe7-4ad9-a2f7-5b1bb832850a','41789be5-76e1-400a-8ebd-fb466e81abbc','f0af72b8-efa5-420c-b604-8097734c09a6'],
+        'f': ['b741e210-a13c-4ea8-b50b-66bb0fbfd767','9294bd0d-46fc-46ed-b5ac-d6a7b1df1321','56aca0e6-b341-4286-aede-f5485d6dbf9f','04966fdb-f52e-410f-8a8c-61558762a528'],
+        'g': ['38ba9a76-31a0-4356-af77-e2d69541ebad','1b698f52-88b8-458e-94b3-bda174053944','0faacca5-e341-4d67-a682-599cd37fd17f','48f027dc-963a-4db6-96c2-88dbb67e1e3b','83f0583d-8462-49fc-8071-c1f1e252e195','d578b25f-8862-409a-a2f6-79e35ad967c2','169d9118-9398-4edb-ac0a-beca9ae0f8e8'],
+        'h': ['be36f726-35e6-4671-9f8b-122043ccc80e','5c550112-257a-4fba-b182-0e32961e2274','3d80cde2-2262-4b73-9932-e9c6a73869d3','5371aba9-3c70-4fb1-9333-890cbdc94ad9'],
+        'i': ['547832a2-3467-4c88-8f30-0ae812b0c39e','081eaff9-1574-4359-b7ac-d58ab8f95bdd'],
+        'j': ['0c03b62d-97f9-4ad2-ad58-034ecf5ef136'],
+        'k': ['eda4c117-36ea-452b-bd18-880f13a51f99','68b70fb7-d920-4edc-95b1-463f7aac41f8','e1769e47-7f0b-4423-aa95-512e1fbf5f96'],
+        'l': ['2a16691a-421f-412c-bfd4-a735166050f8','9414ee5f-25b6-45c9-bf8c-451c85ab269a','6dc17242-0fd3-43d0-95c4-1b28bb817002'],
+        'm': ['ee2575c4-4229-49bc-84c2-d7ec85f77cfe','070f905d-298b-4c78-859b-e38bcdbf4032','321989b8-85f5-4b9c-85b5-3d5a97c4cadb','fe02af8f-d0a0-4089-9a54-cae366c004b9','08758814-368e-4026-a13c-dd94e7f90118','fded0e2b-a91c-40f9-8173-d030817cd8e7'],
+        'n': ['1c58c7e6-d2b2-49c4-9ae5-4267622d9d98','f65053db-fe7f-4757-a675-92c9fd65d155','7ce05901-7c86-4877-88ae-e3ed0b1a504f'],
+        'o': ['16ab3e63-0187-4035-ba88-726a50d33c25','041c61b7-c3aa-47b8-8343-d4190f1e1972','4fed026e-d14d-45f6-ab76-329afed58fcc'],
+        'p': ['967d7d29-7288-4d90-90e3-39b6c79ee74a','b3a242a2-4bb8-41ed-a364-514c0b301de0','f49fbb1e-3ab3-4204-846e-6dbf7b290556'],
+        'q': ['edfd1dd0-bba3-49c2-9ec8-a63f844835cb'],
+        'r': ['342e73a2-2c22-4dd2-8f75-49cabb9fb9bb','aad317a7-7293-4d31-a9de-6f9c3b3521d0','adc62cda-10a3-4abb-bad6-dedb3f656040','da826ed2-4c9b-4a81-9c67-c8252345997b'],
+        's': ['98132b58-3f97-4d65-91a1-ec28d32e504d','8b5caa80-62d6-4bea-bd26-737d58c8c51c','7b1ff13d-bdd4-410b-9e93-e2c6659cbd81','256a7167-388b-4adb-97c0-89567ad4e62e','23281bec-b551-4726-9c2e-658b0b3e962e','ee207b5c-d258-4d58-8858-95aaec5da876','a7f96713-2330-496f-bb60-2eac3d4ede66','2ff30280-43b6-4699-b52c-190f4af23058','54d2ba96-34bb-4971-b1d1-f4bfe5f1eee6','429c169e-bd3d-46ab-ba57-6bad87a798a1'],
+        't': ['bf3cc5dc-c098-4619-81d7-dec0431bd2bb','164d9a50-bcd5-428d-be06-103376ef1ca9','88df1d02-c805-4809-bdea-b635c87c611c','aa31207a-a07f-4646-bb6e-5cc4a0faec82'],
+        'u': ['e0166ea0-0498-4dbe-bbf4-de94fc4a52c3'],
+        'v': ['c1937e4b-4e31-4d9a-b1d8-b3487e9d2e9d','367c0c20-232a-46b9-9af3-1e2fa94c7479','78354079-5446-4e20-8888-76004b951a78'],
+        'w': ['230f4af0-6b68-4585-ae9c-50bc448d02dc','e664d5ed-da57-4953-a997-cc6456a7a29e','516cc4e7-9c00-4276-8c3c-ec95b58a0f6b'],
+        'x': ['9456f6d8-4fb8-4751-a3e4-51eea12d8aff'],
+        'y': ['576a0501-c74c-48a4-b474-c0253cf3d058','d15cf833-cfbb-4343-ac45-1e04b3d9beb0','89048bab-e149-4162-85be-dc83887a5377'],
+        'z': ['de40897f-2dfb-4e4e-8f0e-5240900ce191','414e3051-03ee-4e2a-8fbd-2496f32ab08a']
+    }
+    monsterInfo = None
+    filteredGvars = gvars[monsterName.lower()[0]]
+    for gvar in filteredGvars:
+        monsters = load_json(get_gvar(gvar))
+        monsterInfo = monsters.get(monsterName)
+        if monsterInfo and not monsterInfo.get('_copy', False):
+            break
+    
+    return monsterInfo or {}
+
+def convertCoordinatesToIndexes(coordinates):
+    # Convert coordinates from alphanumeric representation to a set of indexes 
+    x = ''.join(x for x in coordinates if x.isalpha())
+    x = alph.index(x)
+    y = ''.join(y for y in coordinates if y.isdigit())
+    return (int(x), int(y)-1)
+
+def convertCoordinatesToAlphanumeric(coordinates):
+    # Convert coordinates from alphanumeric representation to a set of indexes
+    if typeof(coordinates).lower() in ['safelist', 'safeset', 'tuple'] and len(coordinates) >= 2:
+        return str(alph[coordinates[0]]) + str(coordinates[1]+1)
+
+def getSizeMultiplier(size): 
+    return 1 + (1 if size == 'L' else 2 if size == 'H' else 3 if size == 'G' else 0)
+
+</drac2>
+
+<drac2>
+outputTitle = ""
+outputDesc = ""
+stagesGvar = "bb36a4a9-59fb-4224-bdc4-81fd5ecfc25c"
+stages = load_json(get_gvar(stagesGvar))
+runInfo = load_json(combat().get_metadata('runInfo'))
+# monsters = [combatant for combatant in combat().combatants if combatant.monster_name in [monsterType['name'] for monsterType in runInfo['currentEncounter']['monsters']]]
+monsters = [combatant for combatant in combat().combatants if combatant.monster_name]
+players = [combatant for combatant in combat().combatants if (not combatant.monster_name and not combatant.name == 'DM')]
+
+mapsize = '25x25'   # Default for now
+mapoptions = 'd'
+mapX = 25
+mapY = 25
+playerTilesXSize = 3    # Dimensions of square that players will spawn in (left middle of the map)
+playerTilesYSize = 7
+playerTiles = [(x, y) for x in range(playerTilesXSize) for y in range(ceil(mapY/2) - floor(playerTilesYSize/2), ceil(mapY/2) + ceil(playerTilesYSize/2))]
+# playerTiles = [(x, y) for x in range(ceil(mapX/2) - floor(playerTilesXSize/2), ceil(mapX/2) + ceil(playerTilesXSize/2)) for y in range(ceil(mapY/2) - floor(playerTilesYSize/2), ceil(mapY/2) + ceil(playerTilesYSize/2))]
+for player in players:
+    # Randomly assign positions to players in a playerTilesXSize x playerTilesYSize square
+    tile = playerTiles.pop(randint(len(playerTiles)))
+    combatantsMapInfo[player.name]['location'] = convertCoordinatesToAlphanumeric(tile)
+    combatantsMapInfo[player.name]['color'] = combatantsMapInfo[player.name].get('color', 'b')
+
+# safeTilesXSize = 15     # Dimensions of square that monsters cannot spawn in (middle of the map)
+# safeTilesYSize = 15
+
+minMonsterDistance = 4
+# xValues = [x for x in range(0, floor((mapX - safeTilesXSize) / 2))] + [x for x in range(mapX - floor(safeTilesXSize / 2), mapX)]
+# yValues = [y for y in range(0, floor((mapY - safeTilesYSize) / 2))] + [y for y in range(mapY - floor(safeTilesYSize / 2), mapY)]
+# monsterTiles = [(x, y) for x in xValues for y in yValues]
+monsterTiles = [(x, y) for x in range(playerTilesXSize + minMonsterDistance, mapX) for y in range(mapY)]
+for monster in monsters:
+    combatantsMapInfo[monster.name]['color'] = combatantsMapInfo[monster.name].get('color', 'r')
+    info = getMonsterInfo(monster.monster_name)
+    # if monster.monster_name == "Torbit":
+    #     err(info)
+    if not info:
+        desc.append(f"-# *Could not retrieve monster info for {monster.name}. Using defaults*")
+    size = info.get('size', ['M'])[0]
+    combatantsMapInfo[monster.name]['size'] = size
+    sizeMultiplier = getSizeMultiplier(size)
+    startTile = None
+    viableTiles = monsterTiles.copy()
+    while not startTile:
+        tile = randchoice(viableTiles)
+        badTile = False
+        for x in range(tile[0], tile[0] + sizeMultiplier):
+            for y in range(tile[1], tile[1] + sizeMultiplier):
+                if not (x, y) in viableTiles:
+                    viableTiles.remove((tile[0], tile[1]))
+                    badTile = True
+                    break
+            if badTile:
+                break
+        if badTile:
+            continue
+        else:
+            startTile = tile
+    if not startTile:
+        err(f"Could not properly place monster: {monster.name}")
+    combatantsMapInfo[monster.name]['location'] = convertCoordinatesToAlphanumeric(startTile)
+    for x in range(startTile[0], startTile[0] + sizeMultiplier):
+        for y in range(startTile[1], startTile[1] + sizeMultiplier):
+            monsterTiles.remove((x, y))
+
+</drac2>
+
+<drac2>
+if c:
+    # Parse the collected notes and information into the format readable by otfbm.com
+    people = []
+    for target in combatantsMapInfo:
+        tLocation = combatantsMapInfo[target].get('location')
+        tSize = combatantsMapInfo[target].get('size', 'M')[0].upper()
+        tColor = combatantsMapInfo[target].get(
+            'color', 'b' if '/' in gt(target).hp_str() else 'r') + " "
+        tColor = tColor[:tColor.index(" ")].strip('#')
+        tToken = combatantsMapInfo[target].get('token')
+        # Account for hex colors
+        if len(tColor) in (3, 6):
+            tColor = f"~{tColor}".upper()
+        tName = target.translate(str.maketrans(' ', '_', nameStrip))
+        tName = tName.splitlines()[0]
+        # Only display if they have a location
+        if tLocation:
+            people.append(
+                f"{tLocation}{tSize}{tColor}-{tName}{f'~{tToken}' if tToken else ''}")
+        # Do they have a height set? If so, display it
+        if combatantsMapInfo[target].get('height'):
+            desc.append(
+                f"{target} is currently {combatantsMapInfo[target].get('height').strip('-+')} ft. {['above','below'][int(combatantsMapInfo[target].get('height').strip(' ft.m'))<0] if combatantsMapInfo[target].get('height').strip(' -+ft.m').isdigit() else 'above'} the ground.")
+        # Do they have overlays?
+        for overNum in [""]+[str(x) for x in range(1, 11)]:
+            # Ensure we're not grabbing the previous overlays aim point
+            targAimPoint = ""
+            if combatantsMapInfo[target].get('overlay'+overNum):
+                targPoint = combatantsMapInfo[target].get('location', 'A1')
+                # Is our target Large or bigger? If so, adjust accordingly
+                if combatantsMapInfo[target].get('size', "M")[0] in "LHG":
+                    targOffset = sizeOffset.get(
+                        combatantsMapInfo[target].get('size', "M")[0])
+                    TargX = ''.join(x for x in targPoint if x.isalpha())
+                    TargY = int(''.join(y for y in targPoint if y.isdigit()))
+                    TargX = alph[alph.index(TargX)+targOffset]
+                    TargY += targOffset
+                    targPoint = f"{TargX}{TargY}"
+                # If the target has an aim point set
+                if combatantsMapInfo[target].get('aim'+overNum):
+                    for aimTarget in combatantsMapInfo:
+                        # We need to check to see if they were targetting a... target
+                        if combatantsMapInfo[target].get('aim'+overNum).lower() in aimTarget.lower():
+                            targAimPoint = combatantsMapInfo[aimTarget]['location']
+                            # Is our aimTarget larger than medium? If so, we need to offset to adjust
+                            if combatantsMapInfo[aimTarget].get('size', "M")[0] in "LHG":
+                                targAimOffset = sizeOffset.get(
+                                    combatantsMapInfo[aimTarget].get('size', "M")[0])
+                                targAimTargX = ''.join(
+                                    x for x in targAimPoint if x.isalpha())
+                                targAimTargY = int(
+                                    ''.join(y for y in targAimPoint if y.isdigit()))
+                                targAimTargX = alph[alph.index(
+                                    targAimTargX)+targAimOffset]
+                                targAimTargY += targAimOffset
+                                targAimPoint = f"{targAimTargX}{targAimTargY}"
+                        # If the aimTarget wasn't a target, it was coordinates. Use them.
+                        if not targAimPoint:
+                            targAimPoint = combatantsMapInfo[target].get(
+                                'aim'+overNum).upper()
+                # Add each targets overlay to the overlays list
+                overlays.append(combatantsMapInfo[target].get(
+                    'overlay'+overNum).replace("{targ}", targPoint).replace("{aim}", targAimPoint).strip("*"))
+    # Reconvert all of our map information back into the readable note format
+    dataout = {x: ' | '.join(
+        [f"{item[0].title()}: {item[1]}"for item in combatantsMapInfo[x].items()])for x in combatantsMapInfo}
+    # Then set everyones note again. Kinda a chainsaw instead of a scalpel situation here.
+    for target in dataout:
+        gt(target).set_note(dataout[target])
+    # Join everything together and display the map if we aren't displaying the help
+
+    # Analytics removed, temporarily:
+    # &cid={ctx.channel.id}&sid={ctx.guild.id}&uid={ctx.author.id}{"&d=1" if testVersion else ""}
+    overlays = [f"*{overlay.strip('*')}" for overlay in overlays]
+</drac2>
+
+<drac2>
+if mapattach and mapattach.get_effect('map'):
+   mapattach.remove_effect('map')
+else:
+    for maptarg in ("map", "dm", "lair"):
+        if c.get_combatant(maptarg):
+            mapattach = c.get_combatant(maptarg)
+
+if mapattach:
+    neweffect = f"""{f"Size: {mapsize}" if mapsize else ""}{f" ~ Options: {mapoptions}" if mapoptions else ""}""".strip(" ~")
+    mapattach.add_effect('map', attacks=[{"attack":{"name":"map","automation":[{"type":"text","text":neweffect}],"_v":2}}])
+    desc.append(f"""Autoattached map settings to {mapattach.name}""")
+else:
+    desc.append("Map settings changed, but no map attach target was found. Settings not saved.")
+</drac2>
+
+<drac2>
+if len(debugMessages):
+    return f"""-desc "**__Errors:__** \n{(newline.join(debugMessages))}" """
+else:
+    output = f""" -title "{outputTitle}" -desc "{newline.join([outputDesc] + desc) if outputDesc or desc else ''}" -footer "!ttt help | By @mehmango{f" | Map settings attached to {mapattach.name}" if mapattach else ""}" """
+    finalMap = f"""{map}{mapsize}{f"/{mapviewlocation}:{mapviewsize}" if mapviewsize and mapviewlocation else ""}/{f'_{"_".join(walls)}/' if walls else ""}{f"@{mapoptions}/"if mapoptions else""}{f'{"/".join(objects)}/' if objects else ""}{f'{"*f"+"/*f".join(fow).replace(":", "")}/' if fow else ""}{'/'.join(people+overlays)}/?a=2{f"&load={'&load='.join(loadedjson)}" if loadedjson else ""}{f"&bg={mapbg.split('?')[0]}" if mapbg else ""}"""
+    output += f"""{f' -image "{finalMap}"'} -f "[Map]({finalMap})" """
+    return output
+</drac2>
+-color < color >
