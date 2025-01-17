@@ -1,2 +1,1 @@
-# RR-Avrae-Aliases
-Avrae aliases for the River Rising discord server that I created or had a hand in creating/maintaining
+tag #steamed7949 or Mehmango#7718 with issues

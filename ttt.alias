@@ -1,0 +1,616 @@
+multiline
+{{ctx.prefix}}embed
+<drac2>
+argList = &ARGS&
+args = argparse(argList)
+newline = '\n'
+stagesGvar = "bb36a4a9-59fb-4224-bdc4-81fd5ecfc25c"
+mapSetupGvar = "ce493282-a951-491b-9845-fff51cb7631b"
+levelXpCaps = [100, 200, 400, 500, 1100, 1400, 1700, 2100, 2400, 2800, 3600, 4500, 5100, 5700, 6400, 7200, 8800, 9500, 10900, 12700]
+gpToXpRatio = 0.05
+maxPartyLevelDiff = 2
+baseTime = 140400   # Number of seconds from the UNIX epoch that lines up with the server weekly reset time (Friday, 15:00 UTC)
+secondsInWeek = 604800
+
+title = [':fire: 13 Trials Tower :fire:']
+desc = ['₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪\n']
+footer = [f"{ctx.prefix}ttt help"]
+commands = []
+runInfo = {}
+stages = []
+
+def showHelp():
+    title.append(':fire: 13 Trials Tower commands :fire:')
+
+    desc.append(f"**__⊱ꕥ⊰ ・TTT Run commands・⊱ꕥ⊰__**")
+    desc.append(f"✦ `{ctx.prefix}ttt begin <stage_num>` ⟶ Begin a new TTT run from the specified stage. Channel must not be in combat. \n*(Eg: {ctx.prefix}ttt begin 4)*")
+    desc.append(f"✦ `{ctx.prefix}ttt clear` ⟶ End the current stage and proceed to the next stage. All enemies must be defeated first!")
+    desc.append(f"✦ `{ctx.prefix}ttt rest` ⟶ Take a short rest between stages. Will skip the appropriate number of rounds.")
+    desc.append(f"✦ `{ctx.prefix}ttt status` ⟶ Check the status of the current run.")
+    desc.append(f"✦ `{ctx.prefix}ttt end` ⟶ End the current TTT run. You will keep all rewards earned up until the current stage.")
+    desc.append(f"✦ `{ctx.prefix}ttt record` ⟶ Record your rewards for the current TTT run.")
+
+    desc.append(f"\n**__⊱ꕥ⊰ ・TTT Map commands・⊱ꕥ⊰__**")
+    desc.append(f"✦ `{ctx.prefix}ttt map` ⟶ Enable map for the current TTT run.")
+    desc.append(f"✦ `{ctx.prefix}ttt nomap` ⟶ Disable map for the current TTT run.")
+
+    desc.append(f"\n**__⊱ꕥ⊰ ・Personal commands・⊱ꕥ⊰__**")
+    desc.append(f"✦ `{ctx.prefix}ttt rewards` ⟶ View your highest claimable rewards.")
+    desc.append(f"✦ `{ctx.prefix}ttt claim` ⟶ Claim your TTT rewards. You can only run this once a week.")
+
+    desc.append(f"\n**__⊱ꕥ⊰ ・Miscellaneous commands・⊱ꕥ⊰__**")
+    desc.append(f"✦ `{ctx.prefix}ttt transcript` ⟶ Run this after `!ttt end` to generate a transcript again. Useful for copying on mobile.")
+
+
+def getPlayers():
+    if combat():
+        return [combatant for combatant in combat().combatants if (not combatant.monster_name and not combatant.name == 'DM')]
+    else:
+        return []
+
+def fetchRunInfo():
+    try:
+        storedRunInfo = load_json(combat().get_metadata('runInfo'))
+        if not runInfo:
+            runInfo.update(storedRunInfo)
+        return True
+    except:
+        return False
+
+def runInfoValid():
+    if not combatValid():
+        return
+    if not runInfo:
+        desc.append("**:warning: TTT run data has been corrupted. Please ping mehmango or a moderator.**")
+    return runInfo
+
+def fetchStages():
+    try:
+        stages.extend(load_json(get_gvar(stagesGvar)))
+    except:
+        desc.append("**:warning: Stages have not been properly set up. Please ping a moderator.**")
+    return stages
+
+def stagesValid():
+    if not stages:
+        desc.append("**:warning: Stages have not been properly set up. Please ping a moderator.**")
+    return stages
+
+def combatValid():
+    if not combat():
+       desc.append(f"**:warning: Channel is not in combat. Use `{ctx.prefix}ttt begin` to begin a TTT run.**")
+    return combat()
+
+def isSameWeek(time1, time2):
+    week1 = floor((time1 - baseTime)/secondsInWeek) # Number of weeks that have passed since baseTime
+    week2 = floor((time2 - baseTime)/secondsInWeek)
+
+    return week1 == week2
+
+def formatLongInt(number):
+    number = str(number)
+    digits = [number[len(number) - i - 1] + (',' if i > 0 and i % 3 == 0 else '') for i in range(len(number))]  # '{:20, d}.format() isn't allowed T.T
+    digits.reverse()
+    return ''.join(digits) # Format 1000000 to 1,000,000
+
+def formatXp(number):
+    return formatLongInt(floor(number))
+def formatGp(number):
+    decimals = round(float(number) - float(floor(number)), 2)   # Keep to 2 decimal places
+    number = formatLongInt(floor(number))
+    return f"{number}{str(decimals)[1:]}"
+
+# def xpLeftUntilCap(runInfo, player):
+#     return levelXpCaps[player.levels.total_level - 1] - runInfo.get('playersInfo')[player.name].xpClaimedThisWeek
+
+def playersValid():
+    players = getPlayers()
+    if (len(players) < 1):
+        desc.append(f"**:warning: No player characters found in init! Join the run using `{ctx.prefix}i join`.**")
+        return False
+    else:
+        playerLevels = [player.levels.total_level for player in players]
+        if max(playerLevels) - min(playerLevels) > maxPartyLevelDiff:
+            desc.append(f"**:warning: Invalid party! Party members must be within 3 levels of each other.**")
+            return False
+    return True
+
+def updateRewards(addedXp):
+    output = []
+    players = getPlayers()
+    totalPartyLevel = sum([player.levels.total_level for player in players])
+    xpEarnedDict = runInfo.get('xpEarned', {})
+    for player in players:
+        level = player.levels.total_level
+        oldXpEarned = xpEarnedDict.get(player.name, 0)
+        xpEarned = floor((addedXp * level) / totalPartyLevel)
+        xpEarnedDict.update({ player.name: xpEarned + oldXpEarned })
+    runInfo.update({ 'xpEarned': xpEarnedDict })
+
+    # totalXpEarned = runInfo.get('totalXpEarned', 0)
+    # players = getPlayers()
+    # playerLevels = list(set([player.levels.total_level for player in players])).sort() # Get unique levels of party members, sorted in ascending order
+    # xpEarnedPerPlayer = {player.name: 0 for player in players}
+    # i = 0
+    # xpPool = totalXpEarned
+    # while xpPool > 0 and i < len(playerLevels):
+    #     n = playerLevels[n]
+    #     eligiblePlayersOfNLevel = [player for player in players if player.levels.total_level == n and xpLeftUntilCap(runInfo, player) > 0]
+    #     while xpPool > len(eligiblePlayersOfNLevel) and len(eligiblePlayersOfNLevel) > 0:
+    #         xpPerPlayer = floor(xpPool / len(eligiblePlayersOfNLevel))   # This can cause remnant leftover xp that will never be properly divisible amongst players, thus the above condition "xpPool > len(eligiblePlayersOfNLevel)"
+    #         for player in eligiblePlayersOfNLevel:
+    #             xpEarned = min(xpPerPlayer, xpLeftUntilCap(runInfo, player))
+    #             xpEarnedPerPlayer.update({player.name: xpEarned})
+    #             xpPool -= xpEarned
+    #         eligiblePlayersOfNLevel = [player for player in players if player.levels.total_level == n and xpLeftUntilCap(runInfo, player) > xpEarnedPerPlayer[player.name]]
+
+    #     i += 1
+
+    # output = []
+    # output.append('₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪')
+    # output.append('### Current Rewards:\n')
+    # output.append('**__:arrow_up:  XP:__**')
+    # output.append(f"**Total: {formatNumber(totalXpEarned)}xp")
+        
+    # for player in players:
+    #     xpEarned = xpEarnedPerPlayer[player.name]
+    #     playerInfo = runInfo.get('playersInfo')[player.name]
+    #     output.append(f"\n***{player.name}:** {formatNumber(xpEarned)}xp*")
+    #     output.append(f"*XP earned this week: {formatNumber(playerInfo.xpClaimedThisWeek + xpEarned)} / {formatNumber(levelXpCaps[player.levels.total_level - 1])} xp*")
+    
+    # output.append('**__:moneybag:  GP:__**')
+    # output.append(f"**Total: {formatNumber(totalXpEarned*gpToXpRatio)}gp")
+    # output.append(f"**Per Player: {round(totalXpEarned*gpToXpRatio/len(getPlayers()), 2)}gp")
+
+    # desc.append(newline.join(output))
+
+def displayRewards():
+    xpEarnedDict = runInfo.get('xpEarned', {})
+    totalXpEarned = sum([xpEarnedDict[player] for player in xpEarnedDict])
+    output = []
+    output.append("━━━━━━༺❀༻━━━━━━")
+    output.append('### Current Rewards:')
+    output.append(f'**:arrow_up:  Total XP: **{formatXp(totalXpEarned)}xp')
+    output.append(f'**:moneybag:  Total GP: **{formatGp(totalXpEarned * gpToXpRatio)}gp\n')
+    for player in getPlayers():
+        xpEarned = xpEarnedDict.get(player.name, 0)
+        level = player.levels.total_level
+        output.append(f"\n**__{player.name}__**")
+        output.append(f"**XP:** {formatXp(xpEarned)}xp  *(Weekly cap: {formatXp(levelXpCaps[level - 1])}xp)*")
+        output.append(f"**GP:** {formatGp(xpEarned * gpToXpRatio)}gp")
+
+    output.append("\n━━━━━━༺❀༻━━━━━━")
+    desc.append(newline.join(output))
+
+def setUpMap():
+    code = get_gvar(mapSetupGvar)
+    commands.append(f"""{ctx.prefix}{code}""")
+
+def setUpStage(stages, stageNumber):
+    stageEncounters = stages[stageNumber - 1]['encounters']
+    currentEncounter = randchoice(stageEncounters)
+    runInfo.update({ 'currentEncounter': currentEncounter })
+    desc.append("**Manifesting enemies:**")
+    monsterList = []
+    for monsterType in currentEncounter['monsters']:
+        commands.append(f"""{ctx.prefix}i madd "{monsterType['name']}" -n {monsterType['number']} """)
+        monsterList.append(f"・ {monsterType['number']}x {monsterType['name']}")
+    desc.append(newline.join(monsterList))
+    desc.append(f"\n*Use `{ctx.prefix}{'amimo' if runInfo.get('useMap', False) else 'autol'}` on a monster's turn to automate its actions!*")
+
+def warnRunEnded():
+    desc.append(f"**:warning: This TTT run has already ended! Use `{ctx.prefix}ttt record` to record your rewards.**")
+
+def warnRunNotEnded():
+    desc.append(f"**:warning: This TTT run has not ended yet. Use `{ctx.prefix}ttt end` to end the run.**")
+
+def begin():
+    if combat():
+        desc.append("**:warning: Channel is already in combat. End the current initiative to start a new TTT run.**")
+        return
+    if not stagesValid():
+        return
+    if len(argList) < 2:
+        desc.append(f"**:warning: No starting stage provided. Please specify a starting stage using `{ctx.prefix}ttt begin <stage_num>`.** *(Eg: `{ctx.prefix}ttt begin 2`)*")
+        return
+    if not argList[1].isnumeric() or int(argList[1]) < 0 or int(argList[1]) > len(stages):
+        desc.append(f"**:warning: Specified starting stage is invalid. Valid starting stages are between 1 and {len(stages)}.**")
+        return
+
+    title.append(":fire: Starting a new TTT run :fire:")
+    commands.append(f"{ctx.prefix}i begin")
+    commands.append(f"{ctx.prefix}i add 0 DM -p 999")
+    stageNumber = int(argList[1])
+    desc.append(f"Starting on stage: `{stageNumber}`\n")
+    
+    setUpStage(stages, stageNumber)
+
+    desc.append(f"\n*Join init using `{ctx.prefix}i join`. (Not needed if you ran `{ctx.prefix}ttt begin`)*")
+
+    runInfo['stageNumber'] = stageNumber
+    runInfo['totalXpEarned'] = 0
+
+    commands.append(f"""{ctx.prefix}i join""")
+    commands.append(f"""{ctx.prefix}test <drac2{'>'}combat().set_metadata('runInfo', dump_json({runInfo})); return "Run data successfully updated"</drac2{'>'}""")
+
+    # join()
+
+def join():
+    if not runInfoValid():
+        return
+    
+    tttXp = load_json(character().get_cvar('TTTXp', {}))
+    lastClaimedXpTime = tttXp.get('lastClaimedXpTime', 0)
+    xpClaimedThisWeek = 0
+    if isSameWeek(time(), lastClaimedXpTime):
+       xpClaimedThisWeek = tttXp.get('xpClaimedThisWeek', 0)
+    else:
+        tttXp.update({'xpClaimedThisWeek', 0})
+    
+    playersInfo = runInfo.get('playersInfo', {})
+    if character().name in playersInfo:
+        desc.append(f"**:warning: {character().name} has already joined this TTT run!**")
+    else:
+        partyLevels = [player.levels.total_level for player in getPlayers()]
+        lowestPartyLevel = min([partyLevels] + [level])
+        highestPartyLevel = max([partyLevels] + [level])
+        if highestPartyLevel - lowestPartyLevel > maxPartyLevelDiff:
+            desc.append("**:warning: Parties may only be formed with people across 3 consecutive levels (e.g. 4-6, 8-10).**")
+        else:
+            playersInfo.update({character().name: {'xpClaimedThisWeek': xpClaimedThisWeek}})
+            commands.append(f"{ctx.prefix}i join")
+    
+    runInfo.update({'playersInfo', playersInfo})
+
+def clear(nuke=False):
+    if not (stagesValid() and runInfoValid() and playersValid()):
+        return
+    if runInfo.get('ended', False):
+        warnRunEnded()
+        return
+    if runInfo.get('stageLocked', False):
+        desc.append(f"**:warning: The current stage is still being set up!**")
+        return
+        
+    monsters = [combatant for combatant in combat().combatants if combatant.monster_name in [monsterType['name'] for monsterType in runInfo['currentEncounter']['monsters']]]
+    
+    if not nuke:
+        for monster in monsters:
+            if monster.hp > 0:
+                desc.append("**:warning: Not all monsters have been defeated yet! If this is a mistake, please ping mehmango or a moderator.**")
+                return
+
+    if (runInfo['stageNumber'] < len(stages)):
+        currentEncounter = runInfo['currentEncounter']
+        clearedEncounters = runInfo.get('clearedEncounters', [])
+        clearedEncounters.append(currentEncounter)
+        runInfo.update({ 'clearedEncounters': clearedEncounters })
+        updateRewards(currentEncounter['xp'])
+
+        runInfo.update({ 'stageLocked': True }) # To prevent someone else from runing !ttt clear until all monsters have been added, to avoid skipping a stage
+        
+        status()
+        record(True)
+        title.append(":tada: Stage cleared! Moving to the next stage... :tada:")
+        
+        for monster in monsters:
+            commands.append(f"{ctx.prefix}i remove {monster.name}")
+        
+        commands.append(f"{ctx.prefix}i reroll")
+        commands.append(f"{ctx.prefix}i opt DM -p 999")
+
+        runInfo.update({ 'stageNumber': runInfo['stageNumber'] + 1 })
+        stageNumber = runInfo['stageNumber']
+        desc.append(f"## __Moving to stage {stageNumber}__")
+        
+        setUpStage(stages, stageNumber)
+
+        if runInfo.get('useMap', False):
+            setUpMap()
+
+        commands.append(f"""{ctx.prefix}test <drac2{'>'}
+        runInfo = load_json(combat().get_metadata('runInfo'))
+        runInfo['stageLocked'] = False
+        combat().set_metadata('runInfo', dump_json(runInfo))
+        return "Run data successfully updated"</drac2{'>'}""")
+        
+    else:
+        end()
+        title.append(":tada: Stage cleared! TTT run completed! :tada:")
+
+def status():
+    if not (runInfoValid()):
+        return
+
+    title.append(":abacus: Current run status... :abacus:")
+    desc.append(f"Current stage: `{runInfo['stageNumber']}`")
+    desc.append(f"Short rests taken: `{len(runInfo.get('restedStages', []))}`\n")
+    displayRewards()
+
+def end():
+    if not (runInfoValid() and playersValid()):
+        return
+    if runInfo.get('ended', False):
+        warnRunEnded()
+        return
+    if runInfo.get('stageLocked', False):
+        desc.append(f"**:warning: The current stage is still being set up!**")
+        return
+    
+    runInfo.update({ 'ended': True })
+
+    currentStageCleared = True
+    monsters = [combatant for combatant in combat().combatants if combatant.monster_name in [monsterType['name'] for monsterType in runInfo['currentEncounter']['monsters']]]
+    for monster in monsters:
+        if monster.hp > 0:
+            currentStageCleared = False
+            break
+    if currentStageCleared:
+        currentEncounter = runInfo['currentEncounter']
+        clearedEncounters = runInfo.get('clearedEncounters', [])
+        clearedEncounters.append(currentEncounter)
+        runInfo.update({ 'clearedEncounters': clearedEncounters })
+        updateRewards(currentEncounter['xp'])
+
+    status()
+
+    desc.append("### Transcript:")
+    desc.append("*Post this in <#934483925005385848>*")
+    desc.append("```")
+    desc.append("Reworked TTT Transcript\n")
+    desc.append(f"Players (Level): {', '.join([f'{player.name} ({player.levels.total_level})' for player in getPlayers()])}")
+
+    desc.append("\nEncounters:")
+    for encounter in runInfo.get('clearedEncounters', []):
+        desc.append(f"- {', '.join([f'{monster.name} x{monster.number}' for monster in encounter.monsters])} ({formatXp(encounter.xp)}xp)")
+
+    xpEarnedDict = runInfo.get('xpEarned', {})
+    totalXpEarned = sum([xpEarnedDict[player] for player in xpEarnedDict])
+    playerXps = []
+    playerGps = []
+    desc.append(f"\nTotal XP: {formatXp(totalXpEarned)}")
+    for player in getPlayers():
+        xpEarned = xpEarnedDict.get(player.name, 0)
+        playerXps.append(f"- {player.name}: {formatXp(xpEarned)}")
+        playerGps.append(f"- {player.name}: {formatGp(xpEarned * gpToXpRatio)}")
+    desc.append(f"XP per person:")
+    desc.append(newline.join(playerXps))
+    desc.append(f"\nTotal GP: {formatGp(totalXpEarned * gpToXpRatio)}")
+    desc.append(f"GP per person:")
+    desc.append(newline.join(playerGps))
+    desc.append('```')
+
+    if len(getPlayers()) > 1:
+        desc.append(f"\n**:reminder_ribbon: Record your rewards using `{ctx.prefix}ttt record` before ending initiative!** (Not needed if you ran `{ctx.prefix}ttt end`.)")
+    record(True)
+    if currentStageCleared:
+        title.append(":milky_way: Stage Cleared! Ending this TTT run... :milky_way:")
+    else:
+        title.append(":milky_way: Ending this TTT run... :milky_way:")
+
+def unend():
+    title.append("**:exclamation: For moderator use only!**")
+    if not (runInfoValid() and playersValid()):
+        return
+    if not runInfo.get('ended', False):
+        warnRunNotEnded()
+        return
+    
+    runInfo.update({ 'ended': False })
+
+    desc.append(":arrow_forward: Resuming this TTT run... :arrow_forward:")
+
+def transcript():
+    if not (runInfoValid() and playersValid()):
+        return
+    if not runInfo.get('ended', False):
+        warnRunNotEnded()
+        return
+    title.append(":scroll: Generating TTT Transcript... :scroll:")
+    desc.append("*Post this in <#934483925005385848>*")
+    output = []
+    output.append('```')
+    output.append("Reworked TTT Transcript\n")
+    output.append(f"Players (Level): {', '.join([f'{player.name} ({player.levels.total_level})' for player in getPlayers()])}")
+
+    output.append("\nEncounters:")
+    for encounter in runInfo.get('clearedEncounters', []):
+        output.append(f"- {', '.join([f'{monster.name} x{monster.number}' for monster in encounter.monsters])} ({formatXp(encounter.xp)}xp)")
+
+    xpEarnedDict = runInfo.get('xpEarned', {})
+    totalXpEarned = sum([xpEarnedDict[player] for player in xpEarnedDict])
+    playerXps = []
+    playerGps = []
+    output.append(f"\nTotal XP: {formatXp(totalXpEarned)}")
+    for player in getPlayers():
+        xpEarned = xpEarnedDict.get(player.name, 0)
+        playerXps.append(f"- {player.name}: {formatXp(xpEarned)}")
+        playerGps.append(f"- {player.name}: {formatGp(xpEarned * gpToXpRatio)}")
+    output.append(f"XP per person:")
+    output.append(newline.join(playerXps))
+    output.append(f"\nTotal GP: {formatGp(totalXpEarned * gpToXpRatio)}")
+    output.append(f"GP per person:")
+    output.append(newline.join(playerGps))
+    output.append('```')
+
+    commands.append(f"{ctx.prefix}echo {newline.join(output)}")
+
+def record(compact=False):
+    if not (runInfoValid() and playersValid()):
+        return
+    # if not runInfo.get('ended', False):
+    #     desc.append(f"**:warning: TTT run has not ended yet. Use `{ctx.prefix}ttt end` to end the run.**")
+    #     return
+
+    title.append(f":reminder_ribbon: {character().name} records their rewards :reminder_ribbon:")
+
+    xpEarned = runInfo.get('xpEarned', {}).get(character().name, 0)
+    previousXpEarned = int(character().get_cvar('TTTXp', 0))
+    character().set_cvar('TTTXp', max(xpEarned, previousXpEarned))
+
+    output = []
+    output.append('━━━━━━༺❀༻━━━━━━\n')
+    output.append(f"**:arrow_up: XP:** {formatXp(xpEarned)}xp  *(Weekly cap: {formatXp(levelXpCaps[level - 1])}xp)*")
+    output.append(f"**:moneybag: GP:** {formatGp(xpEarned * gpToXpRatio)}gp")
+
+    if xpEarned > previousXpEarned:
+        output.append("\n***:star2: Weekly Personal Best!***")
+
+    output.append('\n━━━━━━༺❀༻━━━━━━')
+
+    if not compact:
+        desc.append(newline.join(output))
+        desc.append(f"\n*:eyes: Check your rewards this week using `{ctx.prefix}ttt rewards`.*")
+        desc.append(f"*:trophy: Claim your rewards using `{ctx.prefix}ttt claim` in <#920235501770932255>. You can only claim rewards once a week!*")
+        
+    desc.append(f"\n:reminder_ribbon: *{character().name}'s rewards have been recorded.*")
+
+def rewards():
+    title.append(f":fire: {character().name}'s TTT rewards this week: :fire:")
+    xpEarned = int(character().get_cvar('TTTXp', 0))
+    xpCap = levelXpCaps[level - 1]
+
+    output = []
+    output.append('━━━━━━༺❀༻━━━━━━\n')
+    output.append(f"**:arrow_up: XP:** {formatXp(xpEarned)}xp  *(Weekly cap: {formatXp(xpCap)}xp)*")
+    if xpEarned > xpCap:
+        output.append(f"*:grey_exclamation: You will only be able to claim {formatXp(xpCap)}xp this week.*\n")
+    output.append(f"**:moneybag: GP:** {formatGp(xpEarned * gpToXpRatio)}gp")
+    output.append('\n━━━━━━༺❀༻━━━━━━')
+
+    desc.append(newline.join(output))
+
+    lastClaimed = float(character().get_cvar('TTTLastClaimed', 0))
+    if isSameWeek(lastClaimed, time()):
+        desc.append(f"\n*:warning: {character().name} has already claimed TTT rewards this week.*")
+    else:
+        desc.append(f"\n*:trophy: Claim your rewards using `{ctx.prefix}ttt claim`. You can only claim rewards once a week!*")
+
+def claim():
+    xpCap = levelXpCaps[level - 1]
+    xpEarned = int(character().get_cvar('TTTXp', 0))
+    cappedXpEarned = min(xpEarned, xpCap)
+    lastClaimed = float(character().get_cvar('TTTLastClaimed', 0))
+
+    if xpEarned < 1:
+        desc.append(f"**<:nezukodead:921798440789377024> {character().name} has not earned any TTT rewards yet!**")
+    elif isSameWeek(lastClaimed, time()):
+        timeLeftUntilReset = (baseTime - time()) % secondsInWeek
+        desc.append(f"**:warning: {character().name} has already claimed TTT rewards this week!**\n")
+        desc.append(f"*Weekly reset in: {floor(timeLeftUntilReset / 60 / 60 / 24)} days, {floor(timeLeftUntilReset / 60 / 60 % 24)} hours, {floor(timeLeftUntilReset / 60 % 60)} minutes, and {floor(timeLeftUntilReset % 60)} seconds.*")
+    else:
+        title.append(f":trophy: {character().name} claims their TTT rewards for the week! :trophy:")
+        previousXp = int(float(xp))
+        coinPurse = character().coinpurse
+        previousGp = coinPurse.total
+        gpEarned = xpEarned * gpToXpRatio
+        character().set_cvar("xp", previousXp + floor(cappedXpEarned))
+        coinPurse.modify_coins(cp=floor(gpEarned*100))
+        character().set_cvar("TTTLastClaimed", time())
+        character().set_cvar("TTTXp", 0)
+
+        output = []
+        output.append('━━━━━━༺❀༻━━━━━━\n')
+        output.append(f"**:arrow_up: XP:** {formatXp(cappedXpEarned)}xp  *(Weekly cap: {formatXp(xpCap)}xp)*")
+        output.append(f"**:moneybag: GP:** {formatGp(xpEarned * gpToXpRatio)}gp")
+        output.append('\n━━━━━━༺❀༻━━━━━━')
+
+        output.append(f"\n***XP: ** {formatXp(previousXp)}xp → {formatXp(previousXp + floor(cappedXpEarned))}xp*")
+        output.append(f"***GP: ** {formatGp(previousGp)}gp → {formatGp(coinPurse.total)}gp*")
+
+        desc.append(newline.join(output))
+
+def rest():
+    if not (runInfoValid() and playersValid()):
+        return
+    if runInfo.get('ended', False):
+        warnRunEnded()
+        return
+
+    skiprounds = 600    # 1 hr short rest
+    restedStages = runInfo.get('restedStages', [])
+    stageNumber = runInfo['stageNumber']
+    if stageNumber in restedStages:
+        desc.append("**:warning: The party has already rested this stage!**")
+        return
+
+    restedStages.append(stageNumber)
+    title.append(":zzz: The party takes a short rest... :zzz:")
+    if args.get('catnap'):
+        if not runInfo.get('catnapped', False):
+            skiprounds = 100    # 10 min short rest
+            runInfo.update({'catnapped': True}) # Players can only benefit from catnap once per long rest
+        else:
+            desc.append("**:warning: You can only benefit from catnap once per long rest!**\n")
+    commands.append(f"{ctx.prefix}i skipround {skiprounds}")
+    desc.append(f"Skipping **{skiprounds}** rounds *({int(skiprounds / 10)}) minutes*")
+    desc.append(f"\n*Use `{ctx.prefix}g sr` to take a short rest. Hit dice have to be rolled and tracked manually*")
+
+    runInfo.update({ 'restedStages': restedStages })
+
+def map():
+    if not (stagesValid() and runInfoValid() and playersValid()):
+        return
+    if runInfo.get('ended', False):
+        warnRunEnded()
+        return
+    runInfo.update({ 'useMap': True })
+
+    desc.append(":map: **Setting up the map...** :map:")
+    desc.append(f"\n*Use `{ctx.prefix}amimo` on a monster's turn to automate its actions!*")
+
+    setUpMap()
+
+def nomap():
+    if not runInfoValid():
+        return
+    desc.append(":no_entry_sign: **Map disabled.** :no_entry_sign:")
+    desc.append(f"\n*Use `{ctx.prefix}autol` on a monster's turn to automate its actions!*")
+    runInfo.update({ 'useMap': False })
+
+fetchRunInfo()
+fetchStages()
+if args.get('begin'):
+    begin()
+# elif args.get('join')':
+#     join()
+elif args.get('clear'):
+    clear()
+elif args.get('end'):
+    end()
+elif args.get('unend'):
+    unend()
+elif args.get('record'):
+    record()
+elif args.get('rest'):
+    rest()
+elif args.get('rewards'):
+    rewards()
+elif args.get('claim'):
+    claim()
+elif args.get('status'):
+    status()
+elif args.get('nuke'):
+    clear(True)
+elif args.get('map'):
+    map()
+elif args.get('nomap'):
+    nomap()
+elif args.get('transcript'):
+    transcript()
+else:
+    showHelp()
+
+if combat() and runInfo:
+    combat().set_metadata('runInfo', dump_json(runInfo))
+
+desc.append('\n₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪')
+
+# if get('runInfo'):
+#     desc.append(f"""runInfo: {runInfo}""")
+
+</drac2>
+-title "{{f'''{title[-1]}'''}}"
+-desc "{{f'''{newline.join(desc)}'''}}"
+-footer "{{f'''{newline.join(footer)}'''}}"
+{{newline.join(commands)}}

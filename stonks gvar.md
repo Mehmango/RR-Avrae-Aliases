@@ -1,0 +1,1 @@
+Updates the stonks gvar to whatever is specified within the alias
