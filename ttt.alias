@@ -40,6 +40,7 @@ def showHelp():
 
     desc.append(f"\n**__⊱ꕥ⊰ ・Miscellaneous commands・⊱ꕥ⊰__**")
     desc.append(f"✦ `{ctx.prefix}ttt transcript` ⟶ Run this after `!ttt end` to generate a transcript again. Useful for copying on mobile.")
+    desc.append(f"✦ `{ctx.prefix}ttt readd` ⟶ Run this to add monsters that are missing from the current encounter. Useful if you missed Avrae's prompt to select a monster option.")
 
 
 def getPlayers():
@@ -118,64 +119,33 @@ def playersValid():
 def updateRewards(addedXp):
     output = []
     players = getPlayers()
-    totalPartyLevel = sum([player.levels.total_level for player in players])
+    playerLevels = [player.levels.total_level for player in players]
+    totalXpDividend = sum([levelXpCaps[level - 1] for level in playerLevels])
     xpEarnedDict = runInfo.get('xpEarned', {})
     for player in players:
         level = player.levels.total_level
-        oldXpEarned = xpEarnedDict.get(player.name, 0)
-        xpEarned = floor((addedXp * level) / totalPartyLevel)
-        xpEarnedDict.update({ player.name: xpEarned + oldXpEarned })
+        oldXpEarned = xpEarnedDict.get(player.name, {}).get('xpEarned', 0)
+        xpEarned = floor((addedXp * levelXpCaps[level - 1]) / totalXpDividend)
+        xpEarnedDict.update({ player.name: { 'xpEarned': xpEarned + oldXpEarned, 'level': player.levels.total_level }})
+        
+    for playerName, playerDict in xpEarnedDict.items():
+        if not (combat().get_combatant(playerName) or playerDict.get('stageDied', False)):
+            playerDict.update({ 'stageDied': runInfo['stageNumber']})
+                
     runInfo.update({ 'xpEarned': xpEarnedDict })
 
-    # totalXpEarned = runInfo.get('totalXpEarned', 0)
-    # players = getPlayers()
-    # playerLevels = list(set([player.levels.total_level for player in players])).sort() # Get unique levels of party members, sorted in ascending order
-    # xpEarnedPerPlayer = {player.name: 0 for player in players}
-    # i = 0
-    # xpPool = totalXpEarned
-    # while xpPool > 0 and i < len(playerLevels):
-    #     n = playerLevels[n]
-    #     eligiblePlayersOfNLevel = [player for player in players if player.levels.total_level == n and xpLeftUntilCap(runInfo, player) > 0]
-    #     while xpPool > len(eligiblePlayersOfNLevel) and len(eligiblePlayersOfNLevel) > 0:
-    #         xpPerPlayer = floor(xpPool / len(eligiblePlayersOfNLevel))   # This can cause remnant leftover xp that will never be properly divisible amongst players, thus the above condition "xpPool > len(eligiblePlayersOfNLevel)"
-    #         for player in eligiblePlayersOfNLevel:
-    #             xpEarned = min(xpPerPlayer, xpLeftUntilCap(runInfo, player))
-    #             xpEarnedPerPlayer.update({player.name: xpEarned})
-    #             xpPool -= xpEarned
-    #         eligiblePlayersOfNLevel = [player for player in players if player.levels.total_level == n and xpLeftUntilCap(runInfo, player) > xpEarnedPerPlayer[player.name]]
-
-    #     i += 1
-
-    # output = []
-    # output.append('₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪₪')
-    # output.append('### Current Rewards:\n')
-    # output.append('**__:arrow_up:  XP:__**')
-    # output.append(f"**Total: {formatNumber(totalXpEarned)}xp")
-        
-    # for player in players:
-    #     xpEarned = xpEarnedPerPlayer[player.name]
-    #     playerInfo = runInfo.get('playersInfo')[player.name]
-    #     output.append(f"\n***{player.name}:** {formatNumber(xpEarned)}xp*")
-    #     output.append(f"*XP earned this week: {formatNumber(playerInfo.xpClaimedThisWeek + xpEarned)} / {formatNumber(levelXpCaps[player.levels.total_level - 1])} xp*")
-    
-    # output.append('**__:moneybag:  GP:__**')
-    # output.append(f"**Total: {formatNumber(totalXpEarned*gpToXpRatio)}gp")
-    # output.append(f"**Per Player: {round(totalXpEarned*gpToXpRatio/len(getPlayers()), 2)}gp")
-
-    # desc.append(newline.join(output))
-
 def displayRewards():
-    xpEarnedDict = runInfo.get('xpEarned', {})
-    totalXpEarned = sum([xpEarnedDict[player] for player in xpEarnedDict])
+    xpEarnedDict = runInfo.get('xpEarned', {player.name: {'xpEarned': 0, 'level': player.levels.total_level} for player in getPlayers()})
+    totalXpEarned = sum([xpEarnedDict[player].get('xpEarned', 0) for player in xpEarnedDict])
     output = []
     output.append("━━━━━━༺❀༻━━━━━━")
     output.append('### Current Rewards:')
     output.append(f'**:arrow_up:  Total XP: **{formatXp(totalXpEarned)}xp')
     output.append(f'**:moneybag:  Total GP: **{formatGp(totalXpEarned * gpToXpRatio)}gp\n')
-    for player in getPlayers():
-        xpEarned = xpEarnedDict.get(player.name, 0)
-        level = player.levels.total_level
-        output.append(f"\n**__{player.name}__**")
+    for playerName, playerDict in xpEarnedDict.items():
+        xpEarned = playerDict.get('xpEarned')
+        level = playerDict.get('level')
+        output.append(f"""\n**__{playerName}__**{f" *(Died stage {playerDict.get('stageDied')})*" if playerDict.get('stageDied') else ""}""")
         output.append(f"**XP:** {formatXp(xpEarned)}xp  *(Weekly cap: {formatXp(levelXpCaps[level - 1])}xp)*")
         output.append(f"**GP:** {formatGp(xpEarned * gpToXpRatio)}gp")
 
@@ -197,6 +167,36 @@ def setUpStage(stages, stageNumber):
         monsterList.append(f"・ {monsterType['number']}x {monsterType['name']}")
     desc.append(newline.join(monsterList))
     desc.append(f"\n*Use `{ctx.prefix}{'amimo' if runInfo.get('useMap', False) else 'autol'}` on a monster's turn to automate its actions!*")
+
+def generateTranscript():
+    xpEarnedDict = runInfo.get('xpEarned', {player.name: {'xpEarned': 0, 'level': player.levels.total_level} for player in getPlayers()})
+    output = []
+    output.append('```')
+    output.append("Reworked TTT Transcript\n")
+    output.append("Players (Level):")
+    for playerName, playerDict in xpEarnedDict.items():
+        output.append(f"""{playerName} ({playerDict.level}) {f"(Died stage {playerDict.get('stageDied')})" if playerDict.get('stageDied') else ""}""")
+        
+    output.append("\nEncounters:")
+    for encounter in runInfo.get('clearedEncounters', []):
+        output.append(f"- {', '.join([f'{monster.name} x{monster.number}' for monster in encounter.monsters])} ({formatXp(encounter.xp)}xp)")
+
+    totalXpEarned = sum([xpEarnedDict[playerName].get('xpEarned', 0) for playerName in xpEarnedDict])
+    playerXps = []
+    playerGps = []
+    output.append(f"\nTotal XP: {formatXp(totalXpEarned)}")
+    for playerName in xpEarnedDict:
+        xpEarned = xpEarnedDict[playerName].get('xpEarned', 0)
+        playerXps.append(f"- {playerName}: {formatXp(xpEarned)}")
+        playerGps.append(f"- {playerName}: {formatGp(xpEarned * gpToXpRatio)}")
+    output.append(f"XP per person:")
+    output.append(newline.join(playerXps))
+    output.append(f"\nTotal GP: {formatGp(totalXpEarned * gpToXpRatio)}")
+    output.append(f"GP per person:")
+    output.append(newline.join(playerGps))
+    output.append('```')
+    
+    return output
 
 def warnRunEnded():
     desc.append(f"**:warning: This TTT run has already ended! Use `{ctx.prefix}ttt record` to record your rewards.**")
@@ -234,6 +234,40 @@ def begin():
     commands.append(f"""{ctx.prefix}test <drac2{'>'}combat().set_metadata('runInfo', dump_json({runInfo})); return "Run data successfully updated"</drac2{'>'}""")
 
     # join()
+
+def readd():
+    if not (stagesValid() and runInfoValid() and playersValid()):
+        return
+    if runInfo.get('ended', False):
+        warnRunEnded()
+        return
+    if runInfo.get('stageLocked', False):
+        desc.append(f"**:warning: The current stage is still being set up!**")
+        return
+
+    runInfo.update({ 'stageLocked': True }) # To prevent someone else from runing !ttt clear until all monsters have been added, to avoid skipping a stage
+    
+    title.append(":japanese_ogre: Readding monsters. :japanese_ogre:")
+    currentMonsters = [combatant for combatant in combat().combatants if combatant.monster_name in [monsterType['name'] for monsterType in runInfo['currentEncounter']['monsters']]]
+    currentMonsterMonsterNames = [monster.monster_name for monster in currentMonsters]
+    currentEncounter = runInfo['currentEncounter']
+    monsterList = []
+    for monsterType in currentEncounter['monsters']:
+        if not monsterType.name in currentMonsterMonsterNames:
+            commands.append(f"""{ctx.prefix}i madd "{monsterType['name']}" -n {monsterType['number']} """)
+            monsterList.append(f"・ {monsterType['number']}x {monsterType['name']}")
+    
+    if len(monsterList) < 1:
+        desc.append(f"**:warning: All monsters have been added already! Ping mehmango or a moderator if this is wrong.**")
+    else:
+        desc.append(newline.join(monsterList))
+        desc.append(f"\n*Type '1' if the monster isn't being added immediately. Avrae should have prompted you with a selection of monsters.*")
+
+    commands.append(f"""{ctx.prefix}test <drac2{'>'}
+    runInfo = load_json(combat().get_metadata('runInfo'))
+    runInfo['stageLocked'] = False
+    combat().set_metadata('runInfo', dump_json(runInfo))
+    return "Run data successfully updated"</drac2{'>'}""")
 
 def join():
     if not runInfoValid():
@@ -356,29 +390,7 @@ def end():
 
     desc.append("### Transcript:")
     desc.append("*Post this in <#934483925005385848>*")
-    desc.append("```")
-    desc.append("Reworked TTT Transcript\n")
-    desc.append(f"Players (Level): {', '.join([f'{player.name} ({player.levels.total_level})' for player in getPlayers()])}")
-
-    desc.append("\nEncounters:")
-    for encounter in runInfo.get('clearedEncounters', []):
-        desc.append(f"- {', '.join([f'{monster.name} x{monster.number}' for monster in encounter.monsters])} ({formatXp(encounter.xp)}xp)")
-
-    xpEarnedDict = runInfo.get('xpEarned', {})
-    totalXpEarned = sum([xpEarnedDict[player] for player in xpEarnedDict])
-    playerXps = []
-    playerGps = []
-    desc.append(f"\nTotal XP: {formatXp(totalXpEarned)}")
-    for player in getPlayers():
-        xpEarned = xpEarnedDict.get(player.name, 0)
-        playerXps.append(f"- {player.name}: {formatXp(xpEarned)}")
-        playerGps.append(f"- {player.name}: {formatGp(xpEarned * gpToXpRatio)}")
-    desc.append(f"XP per person:")
-    desc.append(newline.join(playerXps))
-    desc.append(f"\nTotal GP: {formatGp(totalXpEarned * gpToXpRatio)}")
-    desc.append(f"GP per person:")
-    desc.append(newline.join(playerGps))
-    desc.append('```')
+    desc.extend(generateTranscript())
 
     if len(getPlayers()) > 1:
         desc.append(f"\n**:reminder_ribbon: Record your rewards using `{ctx.prefix}ttt record` before ending initiative!** (Not needed if you ran `{ctx.prefix}ttt end`.)")
@@ -408,30 +420,7 @@ def transcript():
         return
     title.append(":scroll: Generating TTT Transcript... :scroll:")
     desc.append("*Post this in <#934483925005385848>*")
-    output = []
-    output.append('```')
-    output.append("Reworked TTT Transcript\n")
-    output.append(f"Players (Level): {', '.join([f'{player.name} ({player.levels.total_level})' for player in getPlayers()])}")
-
-    output.append("\nEncounters:")
-    for encounter in runInfo.get('clearedEncounters', []):
-        output.append(f"- {', '.join([f'{monster.name} x{monster.number}' for monster in encounter.monsters])} ({formatXp(encounter.xp)}xp)")
-
-    xpEarnedDict = runInfo.get('xpEarned', {})
-    totalXpEarned = sum([xpEarnedDict[player] for player in xpEarnedDict])
-    playerXps = []
-    playerGps = []
-    output.append(f"\nTotal XP: {formatXp(totalXpEarned)}")
-    for player in getPlayers():
-        xpEarned = xpEarnedDict.get(player.name, 0)
-        playerXps.append(f"- {player.name}: {formatXp(xpEarned)}")
-        playerGps.append(f"- {player.name}: {formatGp(xpEarned * gpToXpRatio)}")
-    output.append(f"XP per person:")
-    output.append(newline.join(playerXps))
-    output.append(f"\nTotal GP: {formatGp(totalXpEarned * gpToXpRatio)}")
-    output.append(f"GP per person:")
-    output.append(newline.join(playerGps))
-    output.append('```')
+    output = generateTranscript()
 
     commands.append(f"{ctx.prefix}echo {newline.join(output)}")
 
@@ -444,7 +433,7 @@ def record(compact=False):
 
     title.append(f":reminder_ribbon: {character().name} records their rewards :reminder_ribbon:")
 
-    xpEarned = runInfo.get('xpEarned', {}).get(character().name, 0)
+    xpEarned = runInfo.get('xpEarned', {}).get(character().name, {}).get('xpEarned', 0)
     previousXpEarned = int(character().get_cvar('TTTXp', 0))
     character().set_cvar('TTTXp', max(xpEarned, previousXpEarned))
 
@@ -574,6 +563,8 @@ if args.get('begin'):
     begin()
 # elif args.get('join')':
 #     join()
+elif args.get('readd'):
+    readd()
 elif args.get('clear'):
     clear()
 elif args.get('end'):
