@@ -1,0 +1,268 @@
+embed
+<drac2>
+WEEKLY_XP = {
+    4: 500, 5: 1100,
+    6: 1400, 7: 1700, 8: 2100, 9: 2400, 10: 2800,
+    11: 3600, 12: 4500, 13: 5100, 14: 5700, 15: 6400,
+    16: 7200, 17: 8800, 18: 9500, 19: 10900, 20: 12700
+}
+
+FLOOR_XP = {
+    1: 200, 2: 400, 3: 800, 4: 1000, 5: 2200,
+    6: 2800, 7: 3400, 8: 4200, 9: 5200, 10: 6200,
+    11: 8200, 12: 9400, 13: 10800, 14: 12400, 15: 15600,
+    16: 19600, 17: 23400, 18: 28400, 19: 34400, 20: 44000,
+    21: 66000, 22: 88000, 23: 110000
+}
+
+args = &ARGS&
+al = ctx.alias
+pref = ctx.prefix
+
+footer = f"{pref}{al} help | GP gain is 10% of XP gain."
+
+# === Helper ===
+
+def generate_floor_ranges():
+    ranges = []
+    num_floors = len(FLOOR_XP)
+    
+    for start in range(1, num_floors + 1):
+        cumulative_xp = FLOOR_XP[start]
+        ranges.append((start, start, cumulative_xp))
+        for end in range(start + 1, num_floors + 1):
+            cumulative_xp += FLOOR_XP[end]
+            ranges.append((start, end, cumulative_xp))
+    
+    return ranges
+    
+
+def find_best_single_level(total_xp):
+    for f, floor_xp in FLOOR_XP.items():
+        if floor_xp > total_xp:
+            return f
+
+    return None
+
+
+def find_best_levels(total_xp, allow_under=False):
+    all_ranges = generate_floor_ranges()
+    considered_ranges = all_ranges if allow_under else [r for r in all_ranges if r[2] > total_xp]
+    considered_ranges.sort(key=lambda tup: abs(total_xp - tup[2]))
+
+    return considered_ranges
+
+
+# === Party Calculator ===
+
+def calc_party():
+    def calculate_party_xp(levels):
+        party_data = [(level, WEEKLY_XP[level]) for level in levels]
+        total_xp = sum(xp for (_, xp) in party_data)
+
+        return (total_xp, party_data)
+
+
+    def output(levels):
+        output_str = ""
+        
+        (total_xp, party_data) = calculate_party_xp(levels)
+        
+        formatted_party_data = " + ".join([f"{xp} ({level})" for (level, xp) in party_data])
+        
+        output_str += f"**Total XP for party:** {formatted_party_data} = __**{total_xp} XP**__\n"
+        output_str += "\n"
+        
+        best_single_floor = find_best_single_level(total_xp)
+        bss_str = f"{best_single_floor} ({FLOOR_XP[best_single_floor]} XP)" if best_single_floor is not None else f"None! Your party needs are too great..."
+        output_str += f"**Best single floor:** {bss_str}\n"
+        output_str += "\n"
+        
+        best_five_floors = find_best_levels(total_xp)[:5]
+        output_str += "**Best five floor(s):**\n"
+        
+        for (start, end, xp) in best_five_floors:
+            floor_name = f"Floor {start}" if start == end else f"Floors {start}-{end}"
+            output_str += f"✦ {floor_name}: {xp} XP\n"
+        output_str += "\n"
+        
+        return output_str
+
+
+    if len(args) < 2:
+        return f":warning: Feed me character levels! Example usage: `{pref}{al} party 13 13 14`"
+
+    levels = []
+    for arg in args[1:]:
+        try:
+            level = int(arg)
+            if not (4 <= level <= 20):
+                return f":warning: Valid TTT levels are between 4 to 20! Got level: {level}"
+            levels.append(level)
+        except:
+            return f":warning: Valid TTT levels are between 4 to 20! Got string: {arg}"
+
+    return output(levels)
+
+
+# === Target Calculator ===
+
+def calc_target():
+    def output(target_xp):
+        output_str = ""
+        
+        output_str += f"**Target XP:** __**{target_xp} XP**__\n"
+        output_str += "\n"
+        
+        best_single_floor = find_best_single_level(target_xp)
+        bss_str = f"{best_single_floor} ({FLOOR_XP[best_single_floor]} XP)" if best_single_floor is not None else f"None! Your XP needs are too great..."
+        output_str += f"**Best single floor:** {bss_str}\n"
+        output_str += "\n"
+        
+        best_five_floors = find_best_levels(target_xp)[:5]
+        output_str += "**Best five floor(s):**\n"
+        
+        for (start, end, xp) in best_five_floors:
+            floor_name = f"Floor {start}" if start == end else f"Floors {start}-{end}"
+            output_str += f"✦ {floor_name}: {xp} XP\n"
+        output_str += "\n"
+        
+        return output_str
+
+
+    if len(args) < 2:
+        return f":warning: Feed me target XP! Example usage: `{pref}{al} target 20000`"
+
+    try:
+        target_xp = int(args[1])
+    except:
+        return f":warning: Input a valid XP number! Got string: {args[1]}"
+
+    return output(target_xp)
+
+
+# === Range Calculator ===
+
+def calc_range():
+    def output(floor_start, floor_end):
+        output_str = ""
+
+        output_str += f"**Given Range:** Floor {floor_start} to {floor_end}\n"
+        output_str += "\n"
+
+        xp = 0
+        for f in range(floor_start, floor_end+1):
+            xp += FLOOR_XP[f]
+
+        output_str += f"Rewards: **__{xp} XP__** ({xp//10} GP)"
+        
+        return output_str
+
+
+    if len(args) < 3:
+        return f":warning: Feed me a floor range! Example usage: `{pref}{al} range 1 23`"
+
+    try:
+        floor_start = int(args[1])
+        floor_end = int(args[2])
+        if floor_start > floor_end:
+            return f":warning: Starting floor should be smaller than ending floor!"
+    except:
+        return f":warning: Input valid floor numbers! Got inputs: {args[1]}, {args[2]}"
+
+    return output(floor_start, floor_end)
+
+
+# === XP Charts ===
+
+def display_charts():
+    return """
+ **:leaves: TTT Stage XP Guide**
+```js
+Floor | Rewards (XP)
+---------------------------
+    1 | 200
+    2 | 400
+    3 | 800
+    4 | 1000
+    5 | 2200
+    6 | 2800
+    7 | 3400
+    8 | 4200
+    9 | 5200
+   10 | 6200
+   11 | 8200
+   12 | 9400
+   13 | 10800
+   14 | 12400
+   15 | 15600
+   16 | 19600
+   17 | 23400
+   18 | 28400
+   19 | 34400
+   20 | 44000
+   21 | 66000
+   22 | 88000
+   23 | 110000
+```
+ **:fallen_leaf: TTT Character XP Guide**
+```c
+Level | Weekly Max XP
+---------------------------
+    1 | ---
+    2 | ---
+    3 | ---
+    4 | 500
+    5 | 1100
+    6 | 1400
+    7 | 1700
+    8 | 2100
+    9 | 2400
+   10 | 2800
+   11 | 3600
+   12 | 4500
+   13 | 5100
+   14 | 5700
+   15 | 6400
+   16 | 7200
+   17 | 8800
+   18 | 9500
+   19 | 10900
+   20 | 12700
+```
+"""
+
+
+# === Help Text ===
+
+def help_text():
+    return f"""**__Subcommands:__**
+✦ `{pref}{al} party <character_level_1> [character_level_2] ...`
+Calculate total XP needed and best floors to fight for your party members.
+
+✦ `{pref}{al} target <target_xp>`
+Find best floors to fight for your target XP.
+
+✦ `{pref}{al} range <floor_start> <floor_end>`
+Find out how much XP is awarded for a given floor range.
+
+✦ `{pref}{al} chart`
+Display the Weekly Character XP and TTT Level XP charts.
+"""
+
+# ---
+if args [:1] == ["chart"]: 
+    desc = display_charts()
+elif args[:1] == ["party"]:
+    desc = calc_party()
+elif args[:1] == ["target"]:
+    desc = calc_target()
+elif args[:1] == ["range"]:
+    desc = calc_range()
+else:
+    desc = help_text()
+
+</drac2>
+-title "TTT XP Calculator"
+-desc "{{desc}}"
+-footer "{{footer}}"

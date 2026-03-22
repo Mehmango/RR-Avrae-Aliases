@@ -1,0 +1,28 @@
+embed
+<drac2>
+args = &ARGS&
+title = "⊱ꕥ⊰ ・Event RPXP"
+desc = ""
+footer = ""
+
+if exists("xp") == False:
+    character().set_cvar("xp", 0)
+
+if not (len(args) == 3 and args[0] in ["player", "dm"] and args[1] in ["add", "remove"] and args[2] in ["casual", "complex"]):
+  desc = "Usage: `!eventrpxp [player|dm] [add|remove] [casual|complex]`"
+  return
+
+multiplier = 2 if args[0] == "player" else 3
+add_or_remove = 1 if args[1] == "add" else -1
+base_xp = 250 * floor(level / 2) if args[2] == "casual" else 500 * floor(level / 2)
+to_add = multiplier * add_or_remove * base_xp
+
+previous_xp = int(float(xp))
+character().set_cvar("xp", previous_xp + to_add)
+
+desc = f"{abs(to_add)}xp has been {'directly added to' if args[1] == 'add' else 'directly removed from'} {name}'s XP cvar!"
+footer = f"({args[0]} → {multiplier}x, {args[2]} → {base_xp}) | Your current XP cvar (not XP cap): {previous_xp} → {int(xp)}"
+</drac2>
+-title "{{title}}"
+-desc "{{desc}}"
+-footer "{{footer}}"

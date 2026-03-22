@@ -1,0 +1,1 @@
+Usage: `!eventrpxp [player|dm] [add|remove] [casual|complex]`. Made for use in conjuction with `!RRrpxp`.
