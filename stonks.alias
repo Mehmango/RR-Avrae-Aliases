@@ -61,6 +61,18 @@ def isInteractionsRefreshed(refreshTime):
     refreshDay = floor((refreshTime - baseTimeMonday) % secondsInWeek / secondsInDay)
     return refreshDay >= 4  # Refresh is between friday and monday
 
+def getExactRefreshTime(refreshTime):
+    # Get the exact refresh time of the most recent refresh (including current refresh)
+    refreshDay = floor((refreshTime - baseTimeMonday) % secondsInWeek / secondsInDay)
+    if refreshDay < 4:
+        # Refresh is between Monday and Friday. Exact refresh time is the most recent Monday
+        recentMondayTime = refreshTime - (refreshTime - baseTimeMonday) % secondsInWeek
+        return recentMondayTime
+    else:
+        # Refresh is between Friday and Monday. Exact refresh time is the most recent Friday
+        recentFridayTime = refreshTime - (refreshTime - baseTimeFriday) % secondsInWeek
+        return recentFridayTime
+
 if not combat():
     title = ":warning: Channel not in combat! :warning:"
     desc += "Ping @mehmango to help restore stonks."
@@ -109,12 +121,11 @@ else:
     # Refresh player stonks data
     lastRefreshTime = stonksState.get('lastRefreshTime', baseTimeMonday)
     if playerDict.get('refreshTime', 0) != lastRefreshTime:
-        playerDict.update(refreshTime=lastRefreshTime)
         for stock in playerDict.stocks:
             playerDict.stocks[stock].update(stocksBoughtThisRefresh=0)
-        if isInteractionsRefreshed(lastRefreshTime):
+        if time() - playerDict.get('refreshTime', 0) >= 604800 or isInteractionsRefreshed(lastRefreshTime):
             playerDict.update(interactions=INTERACTIONS_PER_LEVEL*level)
-            playerDict.update(refreshTime=lastRefreshTime)
+        playerDict.update(refreshTime=lastRefreshTime)
         
     # Updates the player stonks dictionary with any new industries or clans
     for stock, state in (industryState | clanState).items():
@@ -127,6 +138,7 @@ else:
                     "stocksBoughtThisRefresh": 0,
                         }
                 })
+    playerDict.stocks.pop('maocoin', None)
     if isNewCycle(stonksState):
     # if True:
     # if len(args) > 0 and args[0].lower() == 'r':
@@ -212,9 +224,9 @@ else:
                 newStockValue = round(newStockValue, 2)
 
                 # For maocoin event
-                if clan == 'maocoin' and newStockValue > 69000:
-                    newStockValue = 0
-                    clanState[clan].update(active=False)
+                # if clan == 'maocoin' and newStockValue > 69000:
+                #     newStockValue = 0
+                #     clanState[clan].update(active=False)
                 
                 if newStockValue <= 0:  # Clan's stock has crashed, choose a new clan to replace it 
                     newClans.append(randchoice([clan for clan, values in clanState.items() if not values["active"] and clan not in newClans]))
@@ -253,7 +265,7 @@ else:
                 # desc += "\n\n**✦ Stocks Left: `" + CLAN_STOCK_STARTING_COUNT + "`**"
                 desc += "\n\n*" + clanEvents[currentClanEvent]["hint"] + "*"
                 
-        stonksState.update(lastRefreshTime=time())
+        stonksState.update(lastRefreshTime=getExactRefreshTime(time()))
         
     elif len(args) > 0:
         if args[0].lower() == "report":

@@ -7,7 +7,7 @@ newline = '\n'
 stagesGvar = "bb36a4a9-59fb-4224-bdc4-81fd5ecfc25c"
 mapSetupGvar = "ce493282-a951-491b-9845-fff51cb7631b"
 levelXpCaps = [100, 200, 400, 500, 1100, 1400, 1700, 2100, 2400, 2800, 3600, 4500, 5100, 5700, 6400, 7200, 8800, 9500, 10900, 12700]
-gpToXpRatio = 0.05
+gpToXpRatio = 0.1
 maxPartyLevelDiff = 2
 baseTime = 140400   # Number of seconds from the UNIX epoch that lines up with the server weekly reset time (Friday, 15:00 UTC)
 secondsInWeek = 604800
@@ -42,10 +42,15 @@ def showHelp():
     desc.append(f"✦ `{ctx.prefix}ttt transcript` ⟶ Run this after `!ttt end` to generate a transcript again. Useful for copying on mobile.")
     desc.append(f"✦ `{ctx.prefix}ttt readd` ⟶ Run this to add monsters that are missing from the current encounter. Useful if you missed Avrae's prompt to select a monster option.")
 
+def getCurrentCombatMonsters():
+    if combat():
+        return [combatant for combatant in combat().combatants if (combatant.monster_name and combatant.monster_name.lower()) in [monsterType['name'].lower() for monsterType in runInfo['currentEncounter']['monsters']]]
+    else:
+        return []
 
 def getPlayers():
     if combat():
-        return [combatant for combatant in combat().combatants if (not combatant.monster_name and not combatant.name == 'DM')]
+        return [combatant for combatant in combat().combatants if (not combatant.monster_name and not combatant.name == 'DM' and combatant.levels.total_level)]
     else:
         return []
 
@@ -213,7 +218,7 @@ def begin():
     if len(argList) < 2:
         desc.append(f"**:warning: No starting stage provided. Please specify a starting stage using `{ctx.prefix}ttt begin <stage_num>`.** *(Eg: `{ctx.prefix}ttt begin 2`)*")
         return
-    if not argList[1].isnumeric() or int(argList[1]) < 0 or int(argList[1]) > len(stages):
+    if not argList[1].isnumeric() or int(argList[1]) < 1 or int(argList[1]) > len(stages):
         desc.append(f"**:warning: Specified starting stage is invalid. Valid starting stages are between 1 and {len(stages)}.**")
         return
 
@@ -228,7 +233,6 @@ def begin():
     desc.append(f"\n*Join init using `{ctx.prefix}i join`. (Not needed if you ran `{ctx.prefix}ttt begin`)*")
 
     runInfo['stageNumber'] = stageNumber
-    runInfo['totalXpEarned'] = 0
 
     commands.append(f"""{ctx.prefix}i join""")
     commands.append(f"""{ctx.prefix}test <drac2{'>'}combat().set_metadata('runInfo', dump_json({runInfo})); return "Run data successfully updated"</drac2{'>'}""")
@@ -241,14 +245,14 @@ def readd():
     if runInfo.get('ended', False):
         warnRunEnded()
         return
-    if runInfo.get('stageLocked', False):
-        desc.append(f"**:warning: The current stage is still being set up!**")
-        return
+    # if runInfo.get('stageLocked', False):
+    #     desc.append(f"**:warning: The current stage is still being set up!**")
+    #     return
 
     runInfo.update({ 'stageLocked': True }) # To prevent someone else from runing !ttt clear until all monsters have been added, to avoid skipping a stage
     
     title.append(":japanese_ogre: Readding monsters. :japanese_ogre:")
-    currentMonsters = [combatant for combatant in combat().combatants if combatant.monster_name in [monsterType['name'] for monsterType in runInfo['currentEncounter']['monsters']]]
+    currentMonsters = getCurrentCombatMonsters()
     currentMonsterMonsterNames = [monster.monster_name for monster in currentMonsters]
     currentEncounter = runInfo['currentEncounter']
     monsterList = []
@@ -263,11 +267,7 @@ def readd():
         desc.append(newline.join(monsterList))
         desc.append(f"\n*Type '1' if the monster isn't being added immediately. Avrae should have prompted you with a selection of monsters.*")
 
-    commands.append(f"""{ctx.prefix}test <drac2{'>'}
-    runInfo = load_json(combat().get_metadata('runInfo'))
-    runInfo['stageLocked'] = False
-    combat().set_metadata('runInfo', dump_json(runInfo))
-    return "Run data successfully updated"</drac2{'>'}""")
+    unlockRunInfo(True)
 
 def join():
     if not runInfoValid():
@@ -306,7 +306,7 @@ def clear(nuke=False):
         desc.append(f"**:warning: The current stage is still being set up!**")
         return
         
-    monsters = [combatant for combatant in combat().combatants if combatant.monster_name in [monsterType['name'] for monsterType in runInfo['currentEncounter']['monsters']]]
+    monsters = getCurrentCombatMonsters()
     
     if not nuke:
         for monster in monsters:
@@ -342,11 +342,7 @@ def clear(nuke=False):
         if runInfo.get('useMap', False):
             setUpMap()
 
-        commands.append(f"""{ctx.prefix}test <drac2{'>'}
-        runInfo = load_json(combat().get_metadata('runInfo'))
-        runInfo['stageLocked'] = False
-        combat().set_metadata('runInfo', dump_json(runInfo))
-        return "Run data successfully updated"</drac2{'>'}""")
+        unlockRunInfo(True)
         
     else:
         end()
@@ -374,7 +370,7 @@ def end():
     runInfo.update({ 'ended': True })
 
     currentStageCleared = True
-    monsters = [combatant for combatant in combat().combatants if combatant.monster_name in [monsterType['name'] for monsterType in runInfo['currentEncounter']['monsters']]]
+    monsters = getCurrentCombatMonsters()
     for monster in monsters:
         if monster.hp > 0:
             currentStageCleared = False
@@ -494,7 +490,7 @@ def claim():
         previousGp = coinPurse.total
         gpEarned = xpEarned * gpToXpRatio
         character().set_cvar("xp", previousXp + floor(cappedXpEarned))
-        coinPurse.modify_coins(cp=floor(gpEarned*100))
+        coinPurse.modify_coins(gp=floor(gpEarned))
         character().set_cvar("TTTLastClaimed", time())
         character().set_cvar("TTTXp", 0)
 
@@ -556,6 +552,26 @@ def nomap():
     desc.append(":no_entry_sign: **Map disabled.** :no_entry_sign:")
     desc.append(f"\n*Use `{ctx.prefix}autol` on a monster's turn to automate its actions!*")
     runInfo.update({ 'useMap': False })
+    
+def unlockRunInfo(checkStage=False):
+    checkStageCode = f"""{ctx.prefix}test <drac2{'>'}
+            runInfo = load_json(combat().get_metadata('runInfo'))
+            monsters = [combatant for combatant in combat().combatants if combatant.monster_name and (combatant.monster_name.lower() in [monsterType['name'].lower().strip() for monsterType in runInfo['currentEncounter']['monsters']])]
+            encounterMonsterCount = sum([monsterType.number for monsterType in runInfo['currentEncounter']['monsters']])
+            if len(monsters) < encounterMonsterCount:
+                return 'Not all monsters were added. Run `{ctx.prefix}ttt readd` to readd the required monsters. Make sure to check your Avrae DMs for source selection.'
+            runInfo = load_json(combat().get_metadata('runInfo'))
+            runInfo['stageLocked'] = False
+            combat().set_metadata('runInfo', dump_json(runInfo))
+            return "Run data successfully updated"
+            </drac2{'>'}"""
+    regularCode = f"""{ctx.prefix}test <drac2{'>'}
+        runInfo = load_json(combat().get_metadata('runInfo'))
+        runInfo['stageLocked'] = False
+        combat().set_metadata('runInfo', dump_json(runInfo))
+        return "Run data successfully updated"
+        </drac2{'>'}"""
+    commands.append(checkStageCode if checkStage else regularCode)
 
 fetchRunInfo()
 fetchStages()
@@ -589,6 +605,8 @@ elif args.get('nomap'):
     nomap()
 elif args.get('transcript'):
     transcript()
+elif args.get('unlock'):
+    unlockRunInfo()
 else:
     showHelp()
 
